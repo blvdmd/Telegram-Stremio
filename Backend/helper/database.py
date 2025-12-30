@@ -199,7 +199,10 @@ class Database:
                     quality=metadata_info['quality'],
                     id=metadata_info['encoded_string'],
                     name=name,
-                    size=size
+                    size=size,
+                    sizeInBytes=metadata_info.get('file_size_bytes'),
+                    updated_on=metadata_info.get('telegram_date'),
+                    created_on=metadata_info.get('telegram_date')
                 )]
             )
             return await self.update_movie(media)
@@ -231,7 +234,10 @@ class Database:
                             quality=metadata_info['quality'],
                             id=metadata_info['encoded_string'],
                             name=name,
-                            size=size
+                            size=size,
+                            sizeInBytes=metadata_info.get('file_size_bytes'),
+                            updated_on=metadata_info.get('telegram_date'),
+                            created_on=metadata_info.get('telegram_date')
                         )]
                     )]
                 )]

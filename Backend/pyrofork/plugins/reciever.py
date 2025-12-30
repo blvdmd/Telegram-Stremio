@@ -46,6 +46,10 @@ async def file_receive_handler(client: Client, message: Message):
                     LOGGER.warning(f"Metadata failed for file: {title} (ID: {msg_id})")
                     return
 
+                # Store additional telegram metadata for custom API endpoints
+                metadata_info['file_size_bytes'] = file.file_size
+                metadata_info['telegram_date'] = message.date.isoformat() if message.date else None
+
                 title = remove_urls(title)
                 if not title.endswith(('.mkv', '.mp4')):
                     title += '.mkv'
