@@ -40,12 +40,13 @@
             <div class="flex justify-between items-center h-16">
                 <div class="flex items-center space-x-4">
                     <h1 class="text-2xl font-bold text-primary">Telegram Stremio</h1>
-                    {% if current_user %}
                     <div class="hidden md:flex space-x-4">
+                        <a href="/play" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors">Play</a>
+                        {% if current_user %}
                         <a href="/" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors">Dashboard</a>
                         <a href="/media/manage" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors">Media</a>
+                        {% endif %}
                     </div>
-                    {% endif %}
                 </div>
                 
                 <div class="flex items-center space-x-4">

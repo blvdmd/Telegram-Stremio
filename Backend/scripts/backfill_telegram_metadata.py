@@ -174,23 +174,25 @@ async def main():
             db_key = f"storage_{db_index}"
             LOGGER.info(f"\n--- Processing {db_key} ---")
             
-            # Process movies
+            # Process movies - use batched iteration to avoid memory issues
             movie_collection = db.dbs[db_key]["movie"]
-            movies_cursor = movie_collection.find({})
-            movies = await movies_cursor.to_list(None)
+            movie_count = await movie_collection.count_documents({})
+            LOGGER.info(f"Found {movie_count} movies in {db_key}")
             
-            LOGGER.info(f"Found {len(movies)} movies in {db_key}")
-            for movie in movies:
+            # Process in batches of 100 to limit memory usage
+            batch_size = 100
+            movies_cursor = movie_collection.find({}).batch_size(batch_size)
+            async for movie in movies_cursor:
                 await backfill_movie_telegram_metadata(db, bot, movie, db_key)
                 await asyncio.sleep(0.5)  # Rate limiting
             
-            # Process TV shows
+            # Process TV shows - use batched iteration to avoid memory issues
             tv_collection = db.dbs[db_key]["tv"]
-            tv_cursor = tv_collection.find({})
-            tv_shows = await tv_cursor.to_list(None)
+            tv_count = await tv_collection.count_documents({})
+            LOGGER.info(f"Found {tv_count} TV shows in {db_key}")
             
-            LOGGER.info(f"Found {len(tv_shows)} TV shows in {db_key}")
-            for tv_show in tv_shows:
+            tv_cursor = tv_collection.find({}).batch_size(batch_size)
+            async for tv_show in tv_cursor:
                 await backfill_tv_telegram_metadata(db, bot, tv_show, db_key)
                 await asyncio.sleep(0.5)  # Rate limiting
     

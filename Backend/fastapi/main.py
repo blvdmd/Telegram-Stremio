@@ -12,6 +12,9 @@ from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page
 )
+from Backend.fastapi.routes.custom_template_routes import (
+    play_browse_page, play_files_page
+)
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
     delete_movie_quality_api, delete_tv_quality_api,
@@ -68,6 +71,15 @@ async def public_status(request: Request):
 @app.get("/stremio", response_class=HTMLResponse)
 async def stremio_guide(request: Request):
     return await stremio_guide_page(request)
+
+# --- Play Routes (Public - No Authentication Required) ---
+@app.get("/play", response_class=HTMLResponse)
+async def play_browse(request: Request, media_type: str = "movie"):
+    return await play_browse_page(request, media_type)
+
+@app.get("/play/files", response_class=HTMLResponse)
+async def play_files(request: Request, tmdb_id: int, db_index: int, media_type: str):
+    return await play_files_page(request, tmdb_id, db_index, media_type)
 
 # --- Protected Routes (Authentication Required) ---
 @app.get("/", response_class=HTMLResponse)
