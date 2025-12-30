@@ -146,10 +146,8 @@
                             </svg>
                             <input type="text" readonly 
                                    value="{{ base_url }}/dl/{{ quality.id }}/video.mkv" 
-                                   class="flex-1 text-xs bg-transparent border-none focus:outline-none text-gray-600 truncate"
-                                   id="url-movie-{{ loop.index }}">
-                            <button onclick="copyUrl('url-movie-{{ loop.index }}')" 
-                                    class="text-primary hover:text-blue-700 text-xs font-medium flex-shrink-0">
+                                   class="flex-1 text-xs bg-transparent border-none focus:outline-none text-gray-600 truncate copy-url-input">
+                            <button class="copy-url-btn text-primary hover:text-blue-700 text-xs font-medium flex-shrink-0">
                                 Copy
                             </button>
                         </div>
@@ -179,8 +177,8 @@
                         <h4 class="text-base sm:text-lg font-semibold text-gray-900">Season {{ season.season_number }}</h4>
                         <div class="flex items-center gap-2 sm:gap-4">
                             <span class="text-xs sm:text-sm text-gray-600">{{ season.episodes|length }} episode{{ 's' if season.episodes|length != 1 else '' }}</span>
-                            <button onclick="toggleSeason({{ loop.index0 }})" 
-                                    class="text-blue-600 hover:text-blue-800 transition-colors p-1">
+                            <button class="season-toggle-btn text-blue-600 hover:text-blue-800 transition-colors p-1" 
+                                    data-season-index="{{ loop.index0 }}">
                                 <svg id="season-arrow-{{ loop.index0 }}" class="w-4 h-4 sm:w-5 sm:h-5 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                                 </svg>
@@ -234,10 +232,8 @@
                                                 </svg>
                                                 <input type="text" readonly 
                                                        value="{{ base_url }}/dl/{{ quality.id }}/video.mkv" 
-                                                       class="flex-1 text-xs bg-transparent border-none focus:outline-none text-gray-500 truncate"
-                                                       id="url-s{{ season.season_number }}e{{ episode.episode_number }}-{{ loop.index }}">
-                                                <button onclick="copyUrl('url-s{{ season.season_number }}e{{ episode.episode_number }}-{{ loop.index }}')" 
-                                                        class="text-primary hover:text-blue-700 text-xs font-medium flex-shrink-0">
+                                                       class="flex-1 text-xs bg-transparent border-none focus:outline-none text-gray-500 truncate copy-url-input">
+                                                <button class="copy-url-btn text-primary hover:text-blue-700 text-xs font-medium flex-shrink-0">
                                                     Copy
                                                 </button>
                                             </div>
@@ -282,8 +278,8 @@
 <script>
 // Toggle season visibility
 function toggleSeason(seasonIndex) {
-    const content = document.getElementById(`season-content-${seasonIndex}`);
-    const arrow = document.getElementById(`season-arrow-${seasonIndex}`);
+    var content = document.getElementById('season-content-' + seasonIndex);
+    var arrow = document.getElementById('season-arrow-' + seasonIndex);
     
     if (content.style.display === 'none') {
         content.style.display = 'block';
@@ -294,42 +290,57 @@ function toggleSeason(seasonIndex) {
     }
 }
 
-// Copy URL to clipboard
-function copyUrl(inputId) {
-    const input = document.getElementById(inputId);
+// Copy URL to clipboard - finds the sibling input
+function copyUrl(button) {
+    var container = button.parentElement;
+    var input = container.querySelector('.copy-url-input');
+    if (!input) return;
+    
     input.select();
     input.setSelectionRange(0, 99999);
     
-    navigator.clipboard.writeText(input.value).then(() => {
+    navigator.clipboard.writeText(input.value).then(function() {
         // Show success toast
-        const toast = document.createElement('div');
+        var toast = document.createElement('div');
         toast.className = 'fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center';
-        toast.innerHTML = `
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-            </svg>
-            <span class="text-sm">URL copied to clipboard!</span>
-        `;
+        toast.innerHTML = '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>' +
+            '</svg><span class="text-sm">URL copied to clipboard!</span>';
         document.body.appendChild(toast);
         
-        setTimeout(() => {
+        setTimeout(function() {
             if (document.body.contains(toast)) {
                 document.body.removeChild(toast);
             }
         }, 2000);
-    }).catch(err => {
+    }).catch(function(err) {
         console.error('Failed to copy:', err);
     });
 }
 
 // Initialize page
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', function() {
     // Initialize all seasons as expanded for the first one, collapsed for others
-    document.querySelectorAll('.season-content').forEach((content, index) => {
+    document.querySelectorAll('.season-content').forEach(function(content, index) {
         if (index > 0) {
             content.style.display = 'none';
-            document.getElementById(`season-arrow-${index}`).style.transform = 'rotate(-90deg)';
+            document.getElementById('season-arrow-' + index).style.transform = 'rotate(-90deg)';
         }
+    });
+    
+    // Attach event listeners for season toggle buttons
+    document.querySelectorAll('.season-toggle-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var seasonIndex = this.getAttribute('data-season-index');
+            toggleSeason(seasonIndex);
+        });
+    });
+    
+    // Attach event listeners for copy URL buttons
+    document.querySelectorAll('.copy-url-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            copyUrl(this);
+        });
     });
 });
 </script>

@@ -25,12 +25,21 @@
         }
     </script>
     <style>
-        body { background-color: {{ theme.colors.background }}; color: {{ theme.colors.text }}; }
-        .theme-card { background-color: {{ theme.colors.card }}; }
-        .theme-primary { background-color: {{ theme.colors.primary }}; }
-        .theme-secondary { background-color: {{ theme.colors.secondary }}; }
-        .theme-accent { background-color: {{ theme.colors.accent }}; }
-        .theme-text-secondary { color: {{ theme.colors.text_secondary }}; }
+        :root {
+            --theme-background: {{ theme.colors.background }};
+            --theme-text: {{ theme.colors.text }};
+            --theme-card: {{ theme.colors.card }};
+            --theme-primary: {{ theme.colors.primary }};
+            --theme-secondary: {{ theme.colors.secondary }};
+            --theme-accent: {{ theme.colors.accent }};
+            --theme-text-secondary: {{ theme.colors.text_secondary }};
+        }
+        body { background-color: var(--theme-background); color: var(--theme-text); }
+        .theme-card { background-color: var(--theme-card); }
+        .theme-primary { background-color: var(--theme-primary); }
+        .theme-secondary { background-color: var(--theme-secondary); }
+        .theme-accent { background-color: var(--theme-accent); }
+        .theme-text-secondary { color: var(--theme-text-secondary); }
     </style>
 </head>
 <body class="min-h-screen">
