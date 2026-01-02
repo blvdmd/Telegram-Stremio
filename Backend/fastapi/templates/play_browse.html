@@ -113,6 +113,144 @@ let isLoading = false;
 const mediaType = '{{ media_type }}';
 const pageSize = 24;
 
+// ========== Quality Helper Functions ==========
+
+// Parse quality string to numeric value for comparison
+function parseQuality(q) {
+    if (!q) return 0;
+    const match = String(q).match(/(\d+)p?/i);
+    return match ? parseInt(match[1]) : 0;
+}
+
+// Get quality tier info (label, CSS class) from max quality value
+// main: large text on top, sub: smaller text below
+function getQualityTier(maxQualityValue) {
+    const q = typeof maxQualityValue === 'number' ? maxQualityValue : parseQuality(maxQualityValue);
+    if (q >= 2160) return { tier: '4k', main: '4K', sub: 'ULTRA HD' };
+    if (q >= 1440) return { tier: '2k', main: '2K', sub: 'QHD' };
+    if (q >= 1080) return { tier: '1080p', main: '1080p', sub: 'FULL HD' };
+    if (q >= 720) return { tier: '720p', main: '720p', sub: 'HD' };
+    if (q >= 480) return { tier: '480p', main: '480p', sub: 'SD' };
+    return null;
+}
+
+// Count qualities from telegram array (for movies)
+function countQualitiesFromTelegram(telegramArray) {
+    const counts = { '4K': 0, '2K': 0, '1080p': 0, '720p': 0, '480p': 0, 'other': 0 };
+    let maxQuality = 0;
+    
+    for (const t of telegramArray || []) {
+        const q = parseQuality(t.quality);
+        if (q > maxQuality) maxQuality = q;
+        
+        if (q >= 2160) counts['4K']++;
+        else if (q >= 1440) counts['2K']++;
+        else if (q >= 1080) counts['1080p']++;
+        else if (q >= 720) counts['720p']++;
+        else if (q >= 480) counts['480p']++;
+        else if (q > 0) counts['other']++;
+    }
+    
+    return { counts, maxQuality };
+}
+
+// Count qualities from TV show seasons (for TV shows)
+function countQualitiesFromSeasons(seasons) {
+    const counts = { '4K': 0, '2K': 0, '1080p': 0, '720p': 0, '480p': 0, 'other': 0 };
+    let maxQuality = 0;
+    
+    for (const season of seasons || []) {
+        for (const episode of season.episodes || []) {
+            for (const t of episode.telegram || []) {
+                const q = parseQuality(t.quality);
+                if (q > maxQuality) maxQuality = q;
+                
+                if (q >= 2160) counts['4K']++;
+                else if (q >= 1440) counts['2K']++;
+                else if (q >= 1080) counts['1080p']++;
+                else if (q >= 720) counts['720p']++;
+                else if (q >= 480) counts['480p']++;
+                else if (q > 0) counts['other']++;
+            }
+        }
+    }
+    
+    return { counts, maxQuality };
+}
+
+// Get quality data from item (works for both movies and TV shows)
+function getQualityData(item) {
+    if (mediaType === 'movie') {
+        return countQualitiesFromTelegram(item.telegram);
+    } else {
+        return countQualitiesFromSeasons(item.seasons);
+    }
+}
+
+// Build quality badge HTML (stacked logo style like professional 4K badges)
+function buildQualityBadge(maxQuality) {
+    const tier = getQualityTier(maxQuality);
+    if (!tier) return '';
+    
+    return `<div class="quality-badge tier-${tier.tier}">
+        <span class="res-main">${tier.main}</span>
+        <span class="res-sub">${tier.sub}</span>
+    </div>`;
+}
+
+// Build quality counts HTML (always visible below title)
+function buildQualityCounts(counts) {
+    const items = [];
+    
+    if (counts['4K'] > 0) {
+        items.push(`<span class="quality-count-item q-4k">4K: ${counts['4K']}</span>`);
+    }
+    if (counts['2K'] > 0) {
+        items.push(`<span class="quality-count-item q-2k">2K: ${counts['2K']}</span>`);
+    }
+    if (counts['1080p'] > 0) {
+        items.push(`<span class="quality-count-item q-1080p">1080p: ${counts['1080p']}</span>`);
+    }
+    if (counts['720p'] > 0) {
+        items.push(`<span class="quality-count-item q-720p">720p: ${counts['720p']}</span>`);
+    }
+    if (counts['480p'] > 0) {
+        items.push(`<span class="quality-count-item q-480p">480p: ${counts['480p']}</span>`);
+    }
+    
+    if (items.length === 0) return '';
+    
+    return `<div class="quality-counts">${items.join('')}</div>`;
+}
+
+// Build hover quality details HTML
+function buildQualityHoverDetails(counts) {
+    const rows = [];
+    
+    if (counts['4K'] > 0) {
+        rows.push(`<div class="quality-detail-row"><span class="quality-detail-label">4K Ultra HD</span><span class="quality-detail-count">${counts['4K']}</span></div>`);
+    }
+    if (counts['2K'] > 0) {
+        rows.push(`<div class="quality-detail-row"><span class="quality-detail-label">2K QHD</span><span class="quality-detail-count">${counts['2K']}</span></div>`);
+    }
+    if (counts['1080p'] > 0) {
+        rows.push(`<div class="quality-detail-row"><span class="quality-detail-label">1080p Full HD</span><span class="quality-detail-count">${counts['1080p']}</span></div>`);
+    }
+    if (counts['720p'] > 0) {
+        rows.push(`<div class="quality-detail-row"><span class="quality-detail-label">720p HD</span><span class="quality-detail-count">${counts['720p']}</span></div>`);
+    }
+    if (counts['480p'] > 0) {
+        rows.push(`<div class="quality-detail-row"><span class="quality-detail-label">480p SD</span><span class="quality-detail-count">${counts['480p']}</span></div>`);
+    }
+    if (counts['other'] > 0) {
+        rows.push(`<div class="quality-detail-row"><span class="quality-detail-label">Other</span><span class="quality-detail-count">${counts['other']}</span></div>`);
+    }
+    
+    if (rows.length === 0) return '';
+    
+    return `<div class="quality-details-hover"><div class="quality-details-grid">${rows.join('')}</div></div>`;
+}
+
 // Show loading state
 function showLoading() {
     isLoading = true;
@@ -209,10 +347,17 @@ function createMediaCard(item) {
     const rating = item.rating ? `⭐ ${parseFloat(item.rating).toFixed(1)}` : '';
     const poster = item.poster || 'https://via.placeholder.com/300x450/e5e7eb/9ca3af?text=No+Image';
     
+    // Get quality data
+    const qualityData = getQualityData(item);
+    const qualityBadge = buildQualityBadge(qualityData.maxQuality);
+    const qualityCounts = buildQualityCounts(qualityData.counts);
+    const qualityHover = buildQualityHoverDetails(qualityData.counts);
+    
     return `
         <a href="/play/files?tmdb_id=${item.tmdb_id}&db_index=${item.db_index}&media_type=${mediaType}" 
            class="theme-card rounded-lg shadow hover:shadow-lg transition-all duration-300 group overflow-hidden block cursor-pointer">
             <div class="relative">
+                ${qualityBadge}
                 <div class="aspect-w-2 aspect-h-3">
                     <img src="${poster}" 
                          alt="${title}" 
@@ -220,7 +365,8 @@ function createMediaCard(item) {
                          onerror="this.src='https://via.placeholder.com/300x450/e5e7eb/9ca3af?text=No+Image'"
                          loading="lazy">
                 </div>
-                <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 flex items-center justify-center">
+                ${qualityHover}
+                <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 flex items-center justify-center pointer-events-none">
                     <span class="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300 text-sm font-medium bg-primary px-3 py-1 rounded-full">
                         View Files
                     </span>
@@ -234,6 +380,7 @@ function createMediaCard(item) {
                     <span>${year}</span>
                     ${rating ? `<span>${rating}</span>` : ''}
                 </div>
+                ${qualityCounts}
             </div>
         </a>
     `;
@@ -425,6 +572,245 @@ document.addEventListener('DOMContentLoaded', () => {
 
 .animate-spin {
     animation: spin 1s linear infinite;
+}
+
+/* ========== Quality Badge Styles (Stacked Logo Style) ========== */
+.quality-badge {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    padding: 3px 7px 3px;
+    border-radius: 3px;
+    z-index: 10;
+    font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    min-width: 36px;
+    transition: opacity 0.2s ease;
+}
+
+/* Hide badge on hover */
+.group:hover .quality-badge {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.quality-badge .res-main {
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: -0.4px;
+    line-height: 1;
+}
+
+.quality-badge .res-sub {
+    font-size: 6px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    margin-top: 1px;
+    line-height: 1;
+}
+
+/* 4K Ultra HD - Premium Gold/Black */
+.quality-badge.tier-4k {
+    background: linear-gradient(160deg, #0a0a0a 0%, #1a1a1a 30%, #2d2d2d 50%, #1a1a1a 70%, #0a0a0a 100%);
+    border: 1.5px solid;
+    border-image: linear-gradient(135deg, #ffd700 0%, #ffec8b 50%, #ffd700 100%) 1;
+    box-shadow: 
+        0 2px 10px rgba(255, 215, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0 20px rgba(255, 215, 0, 0.15);
+}
+
+.quality-badge.tier-4k .res-main {
+    background: linear-gradient(180deg, #fff8dc 0%, #ffd700 40%, #daa520 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 1px 2px rgba(255, 215, 0, 0.6));
+}
+
+.quality-badge.tier-4k .res-sub {
+    color: #ffd700;
+    text-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+}
+
+/* 2K QHD - Blue Steel */
+.quality-badge.tier-2k {
+    background: linear-gradient(160deg, #050a14 0%, #0d1a2d 30%, #1a3050 50%, #0d1a2d 70%, #050a14 100%);
+    border: 1.5px solid #4a90d9;
+    box-shadow: 
+        0 2px 8px rgba(74, 144, 217, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.quality-badge.tier-2k .res-main {
+    background: linear-gradient(180deg, #a8d4ff 0%, #60a5fa 40%, #3b82f6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 1px 1px rgba(59, 130, 246, 0.5));
+}
+
+.quality-badge.tier-2k .res-sub {
+    color: #60a5fa;
+    text-shadow: 0 0 6px rgba(96, 165, 250, 0.4);
+}
+
+/* 1080p Full HD - Silver/Platinum */
+.quality-badge.tier-1080p {
+    background: linear-gradient(160deg, #0f0f0f 0%, #252525 30%, #353535 50%, #252525 70%, #0f0f0f 100%);
+    border: 1.5px solid #b0b0b0;
+    box-shadow: 
+        0 2px 8px rgba(200, 200, 200, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.quality-badge.tier-1080p .res-main {
+    background: linear-gradient(180deg, #ffffff 0%, #d0d0d0 40%, #a0a0a0 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.3));
+}
+
+.quality-badge.tier-1080p .res-sub {
+    color: #c0c0c0;
+    text-shadow: 0 0 4px rgba(255, 255, 255, 0.3);
+}
+
+/* 720p HD - Subtle Gray */
+.quality-badge.tier-720p {
+    background: linear-gradient(160deg, #151515 0%, #252525 50%, #151515 100%);
+    border: 1px solid #606060;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.quality-badge.tier-720p .res-main {
+    background: linear-gradient(180deg, #d0d0d0 0%, #a0a0a0 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.quality-badge.tier-720p .res-sub {
+    color: #909090;
+}
+
+/* 480p SD - Muted Brown */
+.quality-badge.tier-480p {
+    background: linear-gradient(160deg, #1a1510 0%, #2a2218 50%, #1a1510 100%);
+    border: 1px solid #5a4d3d;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+}
+
+.quality-badge.tier-480p .res-main {
+    background: linear-gradient(180deg, #c4a882 0%, #9a8060 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.quality-badge.tier-480p .res-sub {
+    color: #8a7560;
+}
+
+/* Quality counts below title */
+.quality-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 10px;
+}
+
+.quality-count-item {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.quality-count-item.q-4k {
+    color: #b8860b;
+    background: rgba(255, 215, 0, 0.1);
+    border-color: rgba(255, 215, 0, 0.3);
+}
+
+.quality-count-item.q-2k {
+    color: #666;
+    background: rgba(128, 128, 128, 0.1);
+    border-color: rgba(128, 128, 128, 0.3);
+}
+
+.quality-count-item.q-1080p {
+    color: #2563eb;
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.quality-count-item.q-720p {
+    color: #6b7280;
+    background: rgba(107, 114, 128, 0.1);
+    border-color: rgba(107, 114, 128, 0.2);
+}
+
+.quality-count-item.q-480p {
+    color: #8b7355;
+    background: rgba(139, 115, 85, 0.1);
+    border-color: rgba(139, 115, 85, 0.2);
+}
+
+/* Hover expansion for quality details */
+.quality-details-hover {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 70%, transparent 100%);
+    padding: 30px 10px 10px;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s ease;
+    pointer-events: none;
+}
+
+.group:hover .quality-details-hover {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.quality-details-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+    font-size: 10px;
+    color: white;
+}
+
+.quality-detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+.quality-detail-label {
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.quality-detail-count {
+    font-weight: 700;
+    color: #ffd700;
 }
 </style>
 {% endblock %}
