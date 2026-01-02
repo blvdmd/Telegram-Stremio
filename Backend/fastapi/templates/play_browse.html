@@ -111,6 +111,7 @@ let currentPage = 1;
 let currentSearch = '';
 let isLoading = false;
 const mediaType = '{{ media_type }}';
+const pageSize = 24;
 
 // Show loading state
 function showLoading() {
@@ -148,9 +149,9 @@ async function loadMedia(page = 1, search = '') {
     currentSearch = search;
     
     try {
-        // Use the custom public API endpoints
+        // Use the custom public API endpoints with pagination
         const endpoint = mediaType === 'movie' ? '/api/media/list_movie' : '/api/media/list_tv';
-        const url = `${endpoint}?count=24`;
+        const url = `${endpoint}?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`;
         console.log('Fetching:', url);
         
         const response = await fetch(url, {
@@ -173,15 +174,7 @@ async function loadMedia(page = 1, search = '') {
         
         const grid = document.getElementById('media-grid');
         const mediaKey = mediaType === 'movie' ? 'movies' : 'tv_shows';
-        let mediaItems = data[mediaKey] || [];
-        
-        // Client-side search filtering if search term provided
-        if (search) {
-            const searchLower = search.toLowerCase();
-            mediaItems = mediaItems.filter(item => 
-                (item.title || '').toLowerCase().includes(searchLower)
-            );
-        }
+        const mediaItems = data[mediaKey] || [];
         
         if (mediaItems.length === 0) {
             grid.innerHTML = '';
@@ -196,8 +189,11 @@ async function loadMedia(page = 1, search = '') {
         // Render media items
         grid.innerHTML = mediaItems.map(item => createMediaCard(item)).join('');
         
+        // Update pagination
+        updatePagination(data.current_page || page, data.total_pages || 1);
+        
         // Update info
-        updateMediaInfo(data, mediaItems.length);
+        updateMediaInfo(data);
         
     } catch (error) {
         console.error('Error loading media:', error);
@@ -243,13 +239,94 @@ function createMediaCard(item) {
     `;
 }
 
+// Update pagination (mirrors media_management.html pattern)
+function updatePagination(currentPageNum, totalPages) {
+    const pagination = document.getElementById('pagination');
+    
+    if (totalPages <= 1) {
+        pagination.classList.add('hidden');
+        return;
+    }
+    
+    pagination.classList.remove('hidden');
+    let paginationHTML = '';
+    
+    // Previous button
+    if (currentPageNum > 1) {
+        paginationHTML += `
+            <button onclick="loadMedia(${currentPageNum - 1}, '${currentSearch.replace(/'/g, "\\'")}')" 
+                    class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
+                Previous
+            </button>
+        `;
+    }
+    
+    // Page numbers
+    const startPage = Math.max(1, currentPageNum - 2);
+    const endPage = Math.min(totalPages, currentPageNum + 2);
+    
+    // First page
+    if (startPage > 1) {
+        paginationHTML += `
+            <button onclick="loadMedia(1, '${currentSearch.replace(/'/g, "\\'")}')" 
+                    class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
+                1
+            </button>
+        `;
+        if (startPage > 2) {
+            paginationHTML += `<span class="px-3 py-2 text-sm">...</span>`;
+        }
+    }
+    
+    // Page range
+    for (let i = startPage; i <= endPage; i++) {
+        const isActive = i === currentPageNum;
+        paginationHTML += `
+            <button onclick="loadMedia(${i}, '${currentSearch.replace(/'/g, "\\'")}')" 
+                    class="px-3 py-2 border rounded-md transition-colors text-sm ${
+                        isActive ? 'theme-primary text-white border-primary' : 'hover:bg-gray-50'
+                    }">
+                ${i}
+            </button>
+        `;
+    }
+    
+    // Last page
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            paginationHTML += `<span class="px-3 py-2 text-sm">...</span>`;
+        }
+        paginationHTML += `
+            <button onclick="loadMedia(${totalPages}, '${currentSearch.replace(/'/g, "\\'")}')" 
+                    class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
+                ${totalPages}
+            </button>
+        `;
+    }
+    
+    // Next button
+    if (currentPageNum < totalPages) {
+        paginationHTML += `
+            <button onclick="loadMedia(${currentPageNum + 1}, '${currentSearch.replace(/'/g, "\\'")}')" 
+                    class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
+                Next
+            </button>
+        `;
+    }
+    
+    pagination.innerHTML = paginationHTML;
+}
+
 // Update media info display
-function updateMediaInfo(data, displayedCount) {
+function updateMediaInfo(data) {
     const mediaInfo = document.getElementById('media-info');
     const resultsInfo = document.getElementById('results-info');
     const dbInfo = document.getElementById('db-info');
     
-    resultsInfo.textContent = `Showing ${displayedCount} of ${data.total_count} ${mediaType}s`;
+    const startItem = ((data.current_page - 1) * pageSize) + 1;
+    const endItem = Math.min(data.current_page * pageSize, data.total_count);
+    
+    resultsInfo.textContent = `Showing ${startItem}-${endItem} of ${data.total_count} ${mediaType}s`;
     
     if (data.databases_checked && data.databases_checked.length > 0) {
         dbInfo.textContent = `Database${data.databases_checked.length > 1 ? 's' : ''}: ${data.databases_checked.join(', ')}`;
@@ -351,4 +428,3 @@ document.addEventListener('DOMContentLoaded', () => {
 }
 </style>
 {% endblock %}
-
