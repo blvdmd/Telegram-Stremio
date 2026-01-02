@@ -2,6 +2,7 @@ aiofiles
 fastapi
 httpx
 motor
+orjson
 parse-torrent-title
 pyrofork
 python-dotenv
