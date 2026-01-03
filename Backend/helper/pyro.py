@@ -144,9 +144,10 @@ async def restart_notification():
 # Bot commands
 commands = [
     BotCommand("start", "🚀 Start the bot"),
+    BotCommand("scan_files", "🔍📂 Scan channels for missed files"),
+    BotCommand("tidy", "🧹 Remove orphaned/invalid entries"),
     BotCommand("set", "🎬 Manually add IMDb metadata"),
     BotCommand("fixmetadata", "⚙️ Fix empty fields of Metadata"),
-    BotCommand("tidy", "🧹 Remove orphaned/invalid entries"),
     BotCommand("log", "📄 Send the log file"),
     BotCommand("restart", "♻️ Restart the bot"),
 ]
