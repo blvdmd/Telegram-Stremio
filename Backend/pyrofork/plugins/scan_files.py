@@ -234,7 +234,7 @@ async def select_date_range(client: Client, query: CallbackQuery):
         )
         return
     
-    # Calculate date range
+    # Calculate date range (use local time to match Pyrogram's message.date)
     now = datetime.now()
     if date_option == "24h":
         start_date = now - timedelta(hours=24)
@@ -509,8 +509,8 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
                 if SCAN_CANCEL_REQUESTED:
                     break
                 
-                # For count mode, stop if we've scanned enough
-                if mode == "count" and limit and messages_scanned >= limit:
+                # For count mode, stop if we've checked enough messages
+                if mode == "count" and limit and stats["messages_checked"] >= limit:
                     break
                 
                 # Calculate batch range
@@ -531,17 +531,26 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
                     current_id = batch_start - 1
                     continue
                 
+                # CRITICAL FIX: Sort messages by ID descending (newest first)
+                # This ensures date filtering works correctly - we process newest messages
+                # first, so when we hit an old message outside the date range, we've already
+                # processed all newer messages in the batch.
+                # Also filters out empty/deleted messages upfront to avoid repeated checks.
+                messages = sorted(
+                    [m for m in messages if m and not m.empty],
+                    key=lambda m: m.id,
+                    reverse=True
+                )
+                
                 for message in messages:
                     if SCAN_CANCEL_REQUESTED:
                         break
                     
-                    # Skip empty messages (deleted or don't exist)
-                    if not message or message.empty:
-                        continue
-                    
                     messages_scanned += 1
                     
                     # Date-based filtering with early exit optimization
+                    # Since we're iterating newest-to-oldest, once we hit an old message,
+                    # all remaining messages in this batch are also old - so we can break.
                     if mode == "date":
                         msg_date = message.date.replace(tzinfo=None) if message.date else None
                         # If message is older than start_date, we're done (scanning newest to oldest)
@@ -554,7 +563,7 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
                     
                     stats["messages_checked"] += 1
                     
-                    # Check if already processed
+                    # Classify message FIRST (before checking limit)
                     if (raw_channel_id, message.id) in existing_msg_ids:
                         stats["already_processed"] += 1
                     elif message.video or (message.document and message.document.mime_type and message.document.mime_type.startswith("video/")):
@@ -562,6 +571,11 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
                         await asyncio.sleep(RATE_LIMIT_DELAY)
                     else:
                         stats["skipped_non_video"] += 1
+                    
+                    # Count mode: stop AFTER classifying the message
+                    if mode == "count" and limit and stats["messages_checked"] >= limit:
+                        scan_complete = True
+                        break
                     
                     # Update progress
                     now = time.time()
@@ -597,7 +611,11 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
                 f"   ├─ 🎬 Movies: {stats['movies_added']}\n"
                 f"   └─ 📺 TV Episodes: {stats['tv_added']}\n"
             )
-        report += f"\n⏭️ Already processed: {format_number(stats['already_processed'])}"
+        report += (
+            f"\n⏭️ Already processed: {format_number(stats['already_processed'])}\n"
+            f"🚫 Skipped (non-video): {format_number(stats['skipped_non_video'])}\n"
+            f"⚠️ Failed (metadata): {format_number(stats['failed_metadata'])}"
+        )
     else:
         if stats["messages_checked"] == 0:
             report = (
@@ -620,6 +638,8 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
                 )
             report += (
                 f"\n⏭️ Already processed: {format_number(stats['already_processed'])}\n"
+                f"🚫 Skipped (non-video): {format_number(stats['skipped_non_video'])}\n"
+                f"⚠️ Failed (metadata): {format_number(stats['failed_metadata'])}\n"
                 f"⏱️ Time taken: {format_eta(elapsed)}"
             )
             
