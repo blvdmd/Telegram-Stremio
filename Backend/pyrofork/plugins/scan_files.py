@@ -581,7 +581,7 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
                     now = time.time()
                     if now - last_progress_update > PROGRESS_INTERVAL:
                         last_progress_update = now
-                        await update_progress(status_message, channel_title, mode_label, stats, start_time)
+                        await update_progress(status_message, channel_title, mode_label, stats, start_time, limit)
                 
                 current_id = batch_start - 1
                 await asyncio.sleep(0.1)  # Small delay between batches
@@ -655,16 +655,27 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
     LOGGER.info(f"[ScanFiles] Completed - Movies: {stats['movies_added']}, TV: {stats['tv_added']}, Already: {stats['already_processed']}")
 
 
-async def update_progress(message: Message, channel: str, mode_label: str, stats: dict, start_time: float):
-    """Update progress message"""
+async def update_progress(message: Message, channel: str, mode_label: str, stats: dict, start_time: float, limit: int = None):
+    """Update progress message with visual progress bar"""
     total_added = stats["movies_added"] + stats["tv_added"]
     elapsed = format_eta(time.time() - start_time)
+    checked = stats["messages_checked"]
+    
+    # Build progress bar
+    if limit and limit > 0:
+        # Count mode: show actual progress bar
+        bar = progress_bar(checked, limit)
+    else:
+        # Date mode: show indeterminate animated bar
+        # Cycle through different fill levels based on checked count
+        fill_level = (checked // 10) % 20
+        bar = f"[{'█' * fill_level}{'░' * (20 - fill_level)}] {format_number(checked)} checked"
     
     try:
         await message.edit_text(
             f"🔍 **Scanning {channel}...**\n\n"
             f"📅 Mode: {mode_label}\n"
-            f"📊 Progress: {format_number(stats['messages_checked'])} messages checked\n"
+            f"📊 {bar}\n"
             f"📁 Found: {total_added} new files\n"
             f"⏭️ Skipped: {format_number(stats['already_processed'])}\n"
             f"⏱️ Elapsed: {elapsed}",
