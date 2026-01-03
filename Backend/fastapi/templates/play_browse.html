@@ -101,7 +101,128 @@
     <div id="media-info" class="theme-card p-4 rounded-lg shadow mt-6 hidden">
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-sm theme-text-secondary">
             <span id="results-info"></span>
-            <span id="db-info"></span>
+            <div class="flex items-center gap-3">
+                <span id="db-info"></span>
+                <div class="flex gap-2">
+                    <button onclick="openTidyModal()" class="maintenance-btn tidy-btn" title="Clean orphaned entries">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        <span>Tidy</span>
+                    </button>
+                    <button onclick="openScanModal()" class="maintenance-btn scan-btn" title="Scan for missing files">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <span>Scan</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tidy Confirmation Modal -->
+<div id="tidy-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 theme-text">Tidy Database</h3>
+        <p class="text-sm theme-text-secondary mb-4">
+            This will scan all entries and remove those whose Telegram messages no longer exist.
+        </p>
+        <div class="flex justify-end gap-2">
+            <button onclick="closeTidyModal()" class="modal-btn cancel-btn">Cancel</button>
+            <button onclick="startTidy()" class="modal-btn confirm-btn">Start Tidy</button>
+        </div>
+    </div>
+</div>
+
+<!-- Scan Configuration Modal -->
+<div id="scan-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 theme-text">Scan for Files</h3>
+        
+        <!-- Channel Selection -->
+        <div class="mb-4">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">Channel</label>
+            <select id="scan-channel" class="modal-input">
+                <option value="all">All Channels</option>
+            </select>
+        </div>
+        
+        <!-- Mode Selection -->
+        <div class="mb-4">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">Scan Mode</label>
+            <div class="flex gap-2">
+                <button onclick="setScanMode('date')" id="mode-date-btn" class="mode-btn active">Date Range</button>
+                <button onclick="setScanMode('count')" id="mode-count-btn" class="mode-btn">Message Count</button>
+            </div>
+        </div>
+        
+        <!-- Date Options (shown when date mode selected) -->
+        <div id="date-options" class="mb-4">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">Time Period</label>
+            <select id="scan-date-preset" class="modal-input" onchange="toggleCustomDateInputs()">
+                <option value="24h">Last 24 Hours</option>
+                <option value="7d" selected>Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+                <option value="90d">Last 90 Days</option>
+                <option value="all">All Time</option>
+                <option value="custom">Custom Date Range...</option>
+            </select>
+            <!-- Custom Date Range Inputs -->
+            <div id="custom-date-inputs" class="hidden mt-3 space-y-2">
+                <div>
+                    <label class="block text-xs theme-text-secondary mb-1">Start Date</label>
+                    <input type="date" id="scan-start-date" class="modal-input">
+                </div>
+                <div>
+                    <label class="block text-xs theme-text-secondary mb-1">End Date</label>
+                    <input type="date" id="scan-end-date" class="modal-input">
+                </div>
+            </div>
+        </div>
+        
+        <!-- Count Options (hidden by default) -->
+        <div id="count-options" class="mb-4 hidden">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">Number of Messages</label>
+            <select id="scan-count" class="modal-input">
+                <option value="100">100 messages</option>
+                <option value="500" selected>500 messages</option>
+                <option value="1000">1000 messages</option>
+                <option value="custom">Custom...</option>
+            </select>
+            <input type="number" id="scan-count-custom" class="modal-input mt-2 hidden" placeholder="Enter number" min="1" max="10000">
+        </div>
+        
+        <div class="flex justify-end gap-2">
+            <button onclick="closeScanModal()" class="modal-btn cancel-btn">Cancel</button>
+            <button onclick="startScan()" class="modal-btn confirm-btn">Start Scan</button>
+        </div>
+    </div>
+</div>
+
+<!-- Progress Modal -->
+<div id="progress-modal" class="modal-overlay hidden">
+    <div class="modal-content progress-modal">
+        <div class="flex items-center gap-3 mb-4">
+            <div id="progress-icon" class="progress-spinner"></div>
+            <h3 id="progress-title" class="text-lg font-bold theme-text">Operation in Progress</h3>
+        </div>
+        
+        <div class="mb-4">
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div id="progress-details" class="progress-details-box mb-4">
+            <!-- Details will be populated by JS in text format -->
+            <p class="text-sm theme-text-secondary">Initializing...</p>
+        </div>
+        
+        <div class="flex justify-end gap-2">
+            <button onclick="cancelOperation()" id="cancel-op-btn" class="modal-btn cancel-btn">Cancel</button>
+            <button onclick="closeProgressModal()" id="close-progress-btn" class="modal-btn confirm-btn hidden">Close</button>
         </div>
     </div>
 </div>
@@ -525,6 +646,362 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+// ========== Maintenance Modal Functions ==========
+
+let scanMode = 'date';
+let statusPollInterval = null;
+
+// Tidy Modal
+function openTidyModal() {
+    document.getElementById('tidy-modal').classList.remove('hidden');
+}
+
+function closeTidyModal() {
+    document.getElementById('tidy-modal').classList.add('hidden');
+}
+
+// Scan Modal
+async function openScanModal() {
+    // Load channels with names
+    try {
+        const response = await fetch('/api/maintenance/channels');
+        const data = await response.json();
+        
+        const select = document.getElementById('scan-channel');
+        select.innerHTML = '<option value="all">All Channels</option>';
+        
+        if (data.channels && data.channels.length > 0) {
+            data.channels.forEach(ch => {
+                const option = document.createElement('option');
+                option.value = ch.id;  // Use ID for API call
+                option.textContent = ch.name;  // Show name to user
+                select.appendChild(option);
+            });
+        }
+    } catch (e) {
+        console.error('Failed to load channels:', e);
+    }
+    
+    document.getElementById('scan-modal').classList.remove('hidden');
+}
+
+function closeScanModal() {
+    document.getElementById('scan-modal').classList.add('hidden');
+    // Reset custom date inputs
+    document.getElementById('custom-date-inputs').classList.add('hidden');
+    document.getElementById('scan-date-preset').value = '7d';
+}
+
+function setScanMode(mode) {
+    scanMode = mode;
+    
+    // Update button states
+    document.getElementById('mode-date-btn').classList.toggle('active', mode === 'date');
+    document.getElementById('mode-count-btn').classList.toggle('active', mode === 'count');
+    
+    // Show/hide options
+    document.getElementById('date-options').classList.toggle('hidden', mode !== 'date');
+    document.getElementById('count-options').classList.toggle('hidden', mode !== 'count');
+}
+
+// Handle custom count selection
+document.getElementById('scan-count')?.addEventListener('change', function() {
+    const customInput = document.getElementById('scan-count-custom');
+    customInput.classList.toggle('hidden', this.value !== 'custom');
+    if (this.value === 'custom') {
+        customInput.focus();
+    }
+});
+
+// Toggle custom date inputs visibility
+function toggleCustomDateInputs() {
+    const preset = document.getElementById('scan-date-preset').value;
+    const customInputs = document.getElementById('custom-date-inputs');
+    customInputs.classList.toggle('hidden', preset !== 'custom');
+    
+    // Set default dates if custom selected
+    if (preset === 'custom') {
+        const today = new Date().toISOString().split('T')[0];
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        
+        const startInput = document.getElementById('scan-start-date');
+        const endInput = document.getElementById('scan-end-date');
+        
+        if (!startInput.value) startInput.value = weekAgo;
+        if (!endInput.value) endInput.value = today;
+    }
+}
+
+// Start Operations
+async function startTidy() {
+    closeTidyModal();
+    showProgressModal('Tidy Database');
+    
+    try {
+        const response = await fetch('/api/maintenance/tidy', { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            startPollingStatus();
+        } else {
+            updateProgressError(data.error || 'Failed to start tidy');
+        }
+    } catch (e) {
+        updateProgressError('Failed to start tidy: ' + e.message);
+    }
+}
+
+async function startScan() {
+    // IMPORTANT: Read all form values BEFORE closing modal (which resets them)
+    const channel = document.getElementById('scan-channel').value;
+    const channels = channel === 'all' ? null : [channel];
+    const datePreset = document.getElementById('scan-date-preset').value;
+    const startDate = document.getElementById('scan-start-date').value;
+    const endDate = document.getElementById('scan-end-date').value;
+    const countSelect = document.getElementById('scan-count');
+    const countValue = countSelect.value;
+    const customCount = document.getElementById('scan-count-custom').value;
+    
+    // Now safe to close modal
+    closeScanModal();
+    showProgressModal('Scan for Files');
+    
+    let requestBody = {
+        channels: channels,
+        mode: scanMode
+    };
+    
+    if (scanMode === 'date') {
+        requestBody.date_preset = datePreset;
+        
+        // Include custom date range if selected
+        if (datePreset === 'custom') {
+            requestBody.start_date = startDate;
+            requestBody.end_date = endDate;
+        }
+    } else {
+        if (countValue === 'custom') {
+            requestBody.limit = parseInt(customCount) || 500;
+        } else {
+            requestBody.limit = parseInt(countValue);
+        }
+    }
+    
+    try {
+        const response = await fetch('/api/maintenance/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            startPollingStatus();
+        } else {
+            updateProgressError(data.error || 'Failed to start scan');
+        }
+    } catch (e) {
+        updateProgressError('Failed to start scan: ' + e.message);
+    }
+}
+
+// Progress Modal
+function showProgressModal(title) {
+    document.getElementById('progress-title').textContent = title;
+    document.getElementById('progress-bar').style.width = '5%';
+    document.getElementById('progress-details').innerHTML = '<p class="text-sm theme-text-secondary">Initializing...</p>';
+    document.getElementById('cancel-op-btn').classList.remove('hidden');
+    document.getElementById('close-progress-btn').classList.add('hidden');
+    // Reset icon to spinner
+    const icon = document.getElementById('progress-icon');
+    icon.innerHTML = '';
+    icon.classList.add('progress-spinner');
+    document.getElementById('progress-modal').classList.remove('hidden');
+}
+
+function closeProgressModal() {
+    stopPollingStatus();
+    document.getElementById('progress-modal').classList.add('hidden');
+    // Refresh the media list
+    loadMedia(currentPage, currentSearch);
+}
+
+function updateProgressError(message) {
+    document.getElementById('progress-status').textContent = 'Error: ' + message;
+    document.getElementById('cancel-op-btn').classList.add('hidden');
+    document.getElementById('close-progress-btn').classList.remove('hidden');
+}
+
+async function cancelOperation() {
+    try {
+        await fetch('/api/maintenance/cancel', { method: 'POST' });
+    } catch (e) {
+        console.error('Cancel failed:', e);
+    }
+}
+
+// Status Polling
+function startPollingStatus() {
+    pollStatus();
+    statusPollInterval = setInterval(pollStatus, 1000);
+}
+
+function stopPollingStatus() {
+    if (statusPollInterval) {
+        clearInterval(statusPollInterval);
+        statusPollInterval = null;
+    }
+}
+
+async function pollStatus() {
+    try {
+        const response = await fetch('/api/maintenance/status');
+        const data = await response.json();
+        
+        if (data.status === 'idle') {
+            stopPollingStatus();
+            return;
+        }
+        
+        // Update progress bar
+        let percent = 0;
+        if (data.operation_type === 'tidy' && data.total_items > 0) {
+            percent = Math.round((data.processed_items / data.total_items) * 100);
+        } else if (data.operation_type === 'scan' && data.total_items > 0) {
+            percent = Math.min(95, Math.round((data.processed_items / data.total_items) * 100));
+        } else if (data.checked > 0 || data.processed_items > 0) {
+            // Indeterminate - show activity
+            percent = Math.min(90, 20 + ((data.checked || data.processed_items) % 70));
+        }
+        document.getElementById('progress-bar').style.width = percent + '%';
+        
+        // Update details (text-based like bot command)
+        const detailsHtml = buildDetailsHtml(data);
+        document.getElementById('progress-details').innerHTML = detailsHtml;
+        
+        // Update icon and title based on status
+        const icon = document.getElementById('progress-icon');
+        const title = document.getElementById('progress-title');
+        
+        if (data.status === 'completed' || data.status === 'cancelled' || data.status === 'error') {
+            stopPollingStatus();
+            document.getElementById('cancel-op-btn').classList.add('hidden');
+            document.getElementById('close-progress-btn').classList.remove('hidden');
+            document.getElementById('progress-bar').style.width = '100%';
+            
+            icon.classList.remove('progress-spinner');
+            if (data.status === 'completed') {
+                icon.innerHTML = '✅';
+                title.textContent = data.operation_type === 'tidy' ? 'Tidy Complete!' : 'Scan Complete!';
+            } else if (data.status === 'cancelled') {
+                icon.innerHTML = '⚠️';
+                title.textContent = 'Operation Cancelled';
+            } else {
+                icon.innerHTML = '❌';
+                title.textContent = 'Error';
+            }
+        }
+    } catch (e) {
+        console.error('Status poll failed:', e);
+    }
+}
+
+function buildDetailsHtml(data) {
+    const elapsed = formatElapsed(data.elapsed_seconds);
+    
+    if (data.operation_type === 'tidy') {
+        const statusLine = data.status === 'running' 
+            ? `<div class="detail-status">🔄 Processing... ${data.current_step || ''}</div>`
+            : '';
+        
+        return `
+            ${statusLine}
+            <div class="detail-section">
+                <div class="detail-row">
+                    <span class="detail-label">📊 Media items scanned:</span>
+                    <span class="detail-value">${data.processed_items.toLocaleString()} / ${data.total_items.toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">🔍 Telegram entries checked:</span>
+                    <span class="detail-value">${data.checked.toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">🗑️ Invalid entries removed:</span>
+                    <span class="detail-value ${data.removed > 0 ? 'text-red' : ''}">${data.removed.toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">⏱️ Time:</span>
+                    <span class="detail-value">${elapsed}</span>
+                </div>
+            </div>
+        `;
+    } else if (data.operation_type === 'scan') {
+        const totalAdded = data.movies_added + data.tv_added;
+        const channelLine = data.channel_name ? `<div class="detail-row"><span class="detail-label">📊 Channel:</span><span class="detail-value">${data.channel_name}</span></div>` : '';
+        const modeLine = data.mode_label ? `<div class="detail-row"><span class="detail-label">📅 Mode:</span><span class="detail-value">${data.mode_label}</span></div>` : '';
+        
+        const statusLine = data.status === 'running' 
+            ? `<div class="detail-status">🔍 Scanning... ${data.processed_items.toLocaleString()} messages checked</div>`
+            : '';
+        
+        let addedSection = `<div class="detail-row"><span class="detail-label">📁 New files added:</span><span class="detail-value ${totalAdded > 0 ? 'text-green' : ''}">${totalAdded}</span></div>`;
+        
+        if (totalAdded > 0) {
+            addedSection += `
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">├─ 🎬 Movies:</span>
+                    <span class="detail-value">${data.movies_added}</span>
+                </div>
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">└─ 📺 TV Episodes:</span>
+                    <span class="detail-value">${data.tv_added}</span>
+                </div>
+            `;
+        }
+        
+        return `
+            ${statusLine}
+            <div class="detail-section">
+                ${channelLine}
+                ${modeLine}
+                <div class="detail-row">
+                    <span class="detail-label">📊 Messages checked:</span>
+                    <span class="detail-value">${data.checked.toLocaleString()}</span>
+                </div>
+                ${addedSection}
+                <div class="detail-row">
+                    <span class="detail-label">⏭️ Already processed:</span>
+                    <span class="detail-value">${data.already_processed.toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">🚫 Skipped (non-video):</span>
+                    <span class="detail-value">${(data.skipped_non_video || 0).toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">⚠️ Failed (metadata):</span>
+                    <span class="detail-value">${(data.failed_metadata || 0).toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">⏱️ Time:</span>
+                    <span class="detail-value">${elapsed}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    return '<p class="text-sm theme-text-secondary">Processing...</p>';
+}
+
+function formatElapsed(seconds) {
+    if (!seconds) return '0s';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    if (mins > 0) {
+        return `${mins}m ${secs}s`;
+    }
+    return `${secs}s`;
+}
 </script>
 
 <style>
@@ -811,6 +1288,235 @@ document.addEventListener('DOMContentLoaded', () => {
 .quality-detail-count {
     font-weight: 700;
     color: #ffd700;
+}
+
+/* Maintenance Buttons */
+.maintenance-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+}
+
+.tidy-btn {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    color: white;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.tidy-btn:hover {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.scan-btn {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: white;
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.scan-btn:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* Modal Styles */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+}
+
+.modal-overlay:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal-content {
+    background: var(--card-bg, #1e293b);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    transform: scale(0.95);
+    transition: transform 0.3s ease;
+}
+
+.modal-overlay:not(.hidden) .modal-content {
+    transform: scale(1);
+}
+
+.progress-modal {
+    max-width: 500px;
+}
+
+.modal-input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #334155);
+    background: var(--input-bg, #0f172a);
+    color: var(--text-color, #e2e8f0);
+    font-size: 14px;
+}
+
+.modal-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.modal-btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cancel-btn {
+    background: transparent;
+    border: 1px solid var(--border-color, #334155);
+    color: var(--text-secondary, #94a3b8);
+}
+
+.cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.confirm-btn {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    border: none;
+    color: white;
+}
+
+.confirm-btn:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+.mode-btn {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #334155);
+    background: transparent;
+    color: var(--text-secondary, #94a3b8);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.mode-btn.active {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    border-color: #3b82f6;
+    color: white;
+}
+
+.mode-btn:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Progress Bar */
+.progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: var(--input-bg, #0f172a);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+/* Progress Details Box */
+.progress-details-box {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+}
+
+.detail-status {
+    color: var(--text-color, #e2e8f0);
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-weight: 500;
+}
+
+.detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--text-secondary, #94a3b8);
+}
+
+.detail-row.detail-indent {
+    padding-left: 16px;
+    font-size: 12px;
+}
+
+.detail-label {
+    color: var(--text-secondary, #94a3b8);
+}
+
+.detail-value {
+    color: var(--text-color, #e2e8f0);
+    font-weight: 600;
+}
+
+.detail-value.text-green {
+    color: #22c55e;
+}
+
+.detail-value.text-red {
+    color: #ef4444;
+}
+
+/* Progress Spinner */
+.progress-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(59, 130, 246, 0.2);
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.progress-spinner:not(.progress-spinner) {
+    font-size: 24px;
+    border: none;
+    animation: none;
 }
 </style>
 {% endblock %}
