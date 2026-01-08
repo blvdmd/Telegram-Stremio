@@ -14,7 +14,7 @@ from pyrogram.errors import FloodWait
 from Backend import db, unsorted_collection
 from Backend.config import Telegram
 from Backend.helper.encrypt import decode_string
-from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls, to_utc_isoformat
 from Backend.helper.metadata import metadata
 from Backend.helper.task_manager import delete_message
 from Backend.logger import LOGGER
@@ -628,7 +628,7 @@ async def process_scan_message(bot, message, stats: dict, progress: OperationPro
                 return await process_unsorted_scan_message(bot, message, stats, progress, error="Metadata lookup failed")
             
             metadata_info['file_size_bytes'] = file.file_size
-            metadata_info['telegram_date'] = message.date.isoformat() if message.date else None
+            metadata_info['telegram_date'] = to_utc_isoformat(message.date)
             
             title = remove_urls(title)
             if not title.endswith(('.mkv', '.mp4')):

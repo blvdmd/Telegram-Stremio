@@ -31,7 +31,8 @@ def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(value, ObjectId):
             result[key] = str(value)
         elif isinstance(value, datetime):
-            result[key] = value.isoformat()
+            # Use strftime for consistent format with microseconds
+            result[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%f')
         elif isinstance(value, list):
             result[key] = [
                 convert_objectid_to_str(item) if isinstance(item, dict) else item 

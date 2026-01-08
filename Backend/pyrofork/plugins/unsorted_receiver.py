@@ -153,8 +153,8 @@ async def handle_unsorted_file(
             
             "processing_error": error,
             
-            # Convert timezone-aware datetime to naive UTC
-            "created_on": message.date.replace(tzinfo=None) if message.date else datetime.utcnow(),
+            # Convert to naive UTC datetime for consistent storage
+            "created_on": datetime.utcfromtimestamp(message.date.timestamp()) if message.date else datetime.utcnow(),
             "updated_on": datetime.utcnow()
         }
         
