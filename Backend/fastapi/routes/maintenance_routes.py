@@ -28,6 +28,10 @@ router = APIRouter(prefix="/api/maintenance", tags=["Maintenance"])
 # -------------------------------
 # Request Models
 # -------------------------------
+class TidyRequest(BaseModel):
+    target: str = "both"  # "both", "videos", "unsorted"
+
+
 class ScanRequest(BaseModel):
     channels: Optional[List[str]] = None  # None means all channels
     mode: str = "date"  # "date" or "count"
@@ -73,10 +77,10 @@ def parse_custom_date(date_str: str) -> Optional[datetime]:
         return None
 
 
-async def run_tidy_background():
+async def run_tidy_background(target: str = "both"):
     """Background task to run tidy operation"""
     try:
-        await run_tidy(StreamBot)
+        await run_tidy(StreamBot, target=target)
     except Exception as e:
         LOGGER.error(f"[Maintenance API] Tidy error: {e}")
 
@@ -164,12 +168,19 @@ async def stream_status():
 
 
 @router.post("/tidy")
-async def start_tidy():
-    """Start tidy operation"""
+async def start_tidy(request: TidyRequest = TidyRequest()):
+    """Start tidy operation with optional target selection"""
     if is_operation_running():
         return {
             "success": False,
             "error": "Another operation is already running"
+        }
+    
+    # Validate target
+    if request.target not in ("both", "videos", "unsorted"):
+        return {
+            "success": False,
+            "error": "Invalid target. Must be 'both', 'videos', or 'unsorted'"
         }
     
     # Check if bot is connected
@@ -180,14 +191,14 @@ async def start_tidy():
         }
     
     # Reset any previous state
-    reset_operation()
+    await reset_operation()
     
     # Start operation as async task (faster than BackgroundTasks thread pool)
-    asyncio.create_task(run_tidy_background())
+    asyncio.create_task(run_tidy_background(target=request.target))
     
     return {
         "success": True,
-        "message": "Tidy operation started"
+        "message": f"Tidy operation started (target: {request.target})"
     }
 
 
@@ -208,7 +219,7 @@ async def start_scan(request: ScanRequest):
         }
     
     # Reset any previous state
-    reset_operation()
+    await reset_operation()
     
     # Determine channels to scan
     all_channels = get_auth_channels()
@@ -293,9 +304,14 @@ async def cancel_operation():
 @router.post("/reset")
 async def reset():
     """Reset operation state (use if stuck)"""
-    reset_operation()
+    await reset_operation()
     return {
         "success": True,
         "message": "Operation state reset"
     }
+
+
+# Note: Unsorted file operations are now unified with main operations.
+# Use /tidy with target="unsorted" or target="both" instead of separate endpoints.
+# Use /scan which automatically processes both video and non-video files.
 

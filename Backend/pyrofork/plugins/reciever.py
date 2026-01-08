@@ -6,6 +6,7 @@ from Backend import db
 from Backend.config import Telegram
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.metadata import metadata
+from Backend.pyrofork.plugins.unsorted_receiver import handle_unsorted_file
 from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
@@ -30,11 +31,13 @@ for _ in range(1):
     create_task(process_file())
 
 
-@Client.on_message(filters.channel & (filters.document | filters.video))
+# Expanded filter to catch all file types (video, document, audio, etc.)
+@Client.on_message(filters.channel & (filters.document | filters.video | filters.audio))
 async def file_receive_handler(client: Client, message: Message):
     if str(message.chat.id) in Telegram.AUTH_CHANNEL:
         try:
-            if message.video or (message.document and message.document.mime_type.startswith("video/")):
+            if message.video or (message.document and message.document.mime_type and message.document.mime_type.startswith("video/")):
+                # Video file - attempt metadata lookup
                 file = message.video or message.document
                 title = message.caption or file.file_name
                 msg_id = message.id
@@ -43,7 +46,9 @@ async def file_receive_handler(client: Client, message: Message):
 
                 metadata_info = await metadata(clean_filename(title), int(channel), msg_id)
                 if metadata_info is None:
+                    # Metadata lookup failed - delegate to unsorted handler
                     LOGGER.warning(f"Metadata failed for file: {title} (ID: {msg_id})")
+                    await handle_unsorted_file(client, message, error="Metadata lookup failed")
                     return
 
                 # Store additional telegram metadata for custom API endpoints
@@ -64,7 +69,8 @@ async def file_receive_handler(client: Client, message: Message):
 
                 await file_queue.put((metadata_info, int(channel), msg_id, size, title))
             else:
-                await message.reply_text("> Not supported")
+                # Non-video file - delegate to unsorted handler
+                await handle_unsorted_file(client, message)
         except FloodWait as e:
             LOGGER.info(f"Sleeping for {str(e.value)}s")
             await asleep(e.value)

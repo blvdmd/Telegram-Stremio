@@ -142,10 +142,12 @@ async def restart_notification():
 
 
 # Bot commands
+# Note: /scan_files now processes both video AND non-video files in one pass
+# Note: /tidy now shows options to tidy: Both, Videos Only, or Unsorted Files Only
 commands = [
     BotCommand("start", "🚀 Start the bot"),
-    BotCommand("scan_files", "🔍📂 Scan channels for missed files"),
-    BotCommand("tidy", "🧹 Remove orphaned/invalid entries"),
+    BotCommand("scan_files", "🔍 Scan channels for all files"),
+    BotCommand("tidy", "🧹 Clean orphaned entries"),
     BotCommand("set", "🎬 Manually add IMDb metadata"),
     BotCommand("fixmetadata", "⚙️ Fix empty fields of Metadata"),
     BotCommand("log", "📄 Send the log file"),

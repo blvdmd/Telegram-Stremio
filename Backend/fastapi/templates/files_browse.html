@@ -1,0 +1,1610 @@
+{% extends "base.html" %}
+
+{% block title %}Files - Telegram Stremio{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <!-- Header -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold">Files</h1>
+        <p class="theme-text-secondary mt-2">Browse unsorted files from your channels</p>
+    </div>
+    
+    <!-- Search and Filters -->
+    <div class="theme-card p-6 rounded-lg shadow mb-6">
+        <div class="flex flex-col lg:flex-row gap-4">
+            <!-- Search -->
+            <div class="flex-1">
+                <input type="text" id="search-input" placeholder="Search files by name or caption..." 
+                       class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm theme-input">
+            </div>
+            
+            <!-- Filter Dropdown -->
+            <div class="flex gap-2">
+                <select id="type-filter" class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary text-sm theme-input">
+                    <option value="">All Types</option>
+                    <option value="archive">📦 Archives</option>
+                    <option value="audio">🎵 Audio</option>
+                    <option value="document">📄 Documents</option>
+                    <option value="video">🎬 Video</option>
+                    <option value="other">📎 Other</option>
+                </select>
+                
+                <!-- Sort Dropdown -->
+                <select id="sort-select" class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary text-sm theme-input">
+                    <option value="created_on:desc">Newest First</option>
+                    <option value="created_on:asc">Oldest First</option>
+                    <option value="file_name:asc">Name (A-Z)</option>
+                    <option value="file_name:desc">Name (Z-A)</option>
+                    <option value="size_bytes:desc">Largest First</option>
+                    <option value="size_bytes:asc">Smallest First</option>
+                </select>
+                
+                <button onclick="searchFiles()" 
+                        class="theme-primary text-white px-6 py-2 rounded-md hover:opacity-90 transition-opacity text-sm font-medium">
+                    Search
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bulk Actions Bar -->
+    <div id="bulk-actions" class="theme-card p-4 rounded-lg shadow mb-6 hidden">
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="select-all" class="w-4 h-4 rounded" onchange="toggleSelectAll()">
+                    <span class="text-sm">Select All</span>
+                </label>
+                <span id="selection-count" class="text-sm theme-text-secondary">0 selected</span>
+            </div>
+            <button id="bulk-delete-btn" onclick="bulkDelete()" 
+                    class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors text-sm font-medium invisible">
+                <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+                Delete Selected
+            </button>
+        </div>
+    </div>
+    
+    <!-- Loading Indicator -->
+    <div id="loading" class="text-center py-12 hidden">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+        <p class="theme-text-secondary">Loading files...</p>
+    </div>
+    
+    <!-- Error Display -->
+    <div id="error-display" class="hidden mb-8">
+        <div class="theme-card p-6 rounded-lg shadow border-l-4 border-red-500">
+            <div class="flex items-center mb-4">
+                <svg class="h-6 w-6 text-red-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.996-.833-2.764 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <h3 class="text-lg font-semibold text-red-700">Error Loading Files</h3>
+            </div>
+            <p id="error-message" class="text-red-600 mb-4"></p>
+            <button onclick="loadFiles()" 
+                    class="theme-primary text-white px-4 py-2 rounded-md hover:opacity-90 transition-opacity text-sm">
+                Try Again
+            </button>
+        </div>
+    </div>
+    
+    <!-- Files Table -->
+    <div id="files-table-container" class="theme-card rounded-lg shadow overflow-hidden mb-6">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="theme-table-header">
+                    <tr>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider" style="width: 40px;">
+                            <input type="checkbox" id="header-select-all" class="w-4 h-4 rounded" onchange="toggleSelectAll()">
+                        </th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider" style="width: 50px;" data-column="type">Type</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider resizable" style="width: 300px; min-width: 150px;" data-column="filename">Filename</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider resizable" style="width: 130px; min-width: 80px;" data-column="source">Source</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider resizable" style="width: 85px; min-width: 70px;" data-column="quality">Quality</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider resizable" style="width: 90px; min-width: 70px;" data-column="duration">Duration</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider resizable" style="width: 90px; min-width: 70px;" data-column="size">Size</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider resizable" style="width: 120px; min-width: 100px;" data-column="date">Date</th>
+                        <th class="px-3 py-3 text-right text-xs font-medium uppercase tracking-wider" style="width: 85px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="files-tbody" class="theme-table-body divide-y">
+                    <!-- Files will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- No Results Message -->
+    <div id="no-results" class="text-center py-12 hidden">
+        <div class="theme-card p-8 rounded-lg shadow">
+            <svg class="mx-auto h-16 w-16 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+            </svg>
+            <h3 class="text-lg font-semibold theme-text-secondary mb-2">No files found</h3>
+            <p class="theme-text-secondary text-sm mb-4">
+                No unsorted files match your search criteria
+            </p>
+            <button onclick="clearSearch()" 
+                    class="theme-primary text-white px-4 py-2 rounded-md hover:opacity-90 transition-opacity text-sm">
+                Clear Filters
+            </button>
+        </div>
+    </div>
+    
+    <!-- Pagination and Controls -->
+    <div id="pagination-container" class="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6 hidden">
+        <!-- Column Settings -->
+        <div class="relative">
+            <button onclick="toggleColumnSettings()" class="flex items-center gap-2 px-3 py-2 text-sm theme-input rounded-md hover:opacity-80">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Columns
+            </button>
+            <div id="column-settings-dropdown" class="absolute left-0 mt-2 w-48 theme-card rounded-md shadow-lg z-50 hidden">
+                <div class="p-3 space-y-2">
+                    <label class="flex items-center gap-2 cursor-pointer text-sm">
+                        <input type="checkbox" data-column-toggle="source" class="w-4 h-4 rounded" onchange="toggleColumnVisibility('source')">
+                        <span>Source</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-sm">
+                        <input type="checkbox" data-column-toggle="quality" class="w-4 h-4 rounded" onchange="toggleColumnVisibility('quality')">
+                        <span>Quality</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-sm">
+                        <input type="checkbox" data-column-toggle="duration" class="w-4 h-4 rounded" onchange="toggleColumnVisibility('duration')">
+                        <span>Duration</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Pagination -->
+        <div id="pagination" class="flex justify-center items-center space-x-2">
+            <!-- Pagination buttons will be loaded here -->
+        </div>
+        
+        <!-- Page Size Dropdown -->
+        <div class="flex items-center gap-2">
+            <span class="text-sm theme-text-secondary">Show:</span>
+            <select id="page-size-select" onchange="changePageSize(this.value)" class="px-3 py-2 text-sm theme-input rounded-md">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+            </select>
+        </div>
+    </div>
+    
+    <!-- Files Info (like /play media-info) -->
+    <div id="files-info" class="theme-card p-4 rounded-lg shadow mt-6 hidden">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-sm theme-text-secondary">
+            <span id="results-info"></span>
+            <div class="flex items-center gap-3">
+                <span id="db-info"></span>
+                <div class="flex gap-2">
+                    <button onclick="openTidyModal()" class="maintenance-btn tidy-btn" title="Clean orphaned entries">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        <span>Tidy</span>
+                    </button>
+                    <button onclick="openScanModal()" class="maintenance-btn scan-btn" title="Scan for unsorted files">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <span>Scan</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="delete-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 theme-text">Delete File?</h3>
+        <p class="text-sm theme-text-secondary mb-2">
+            This will permanently delete:
+        </p>
+        <ul class="text-sm theme-text-secondary mb-4 list-disc list-inside">
+            <li>File from database</li>
+            <li>Original message from Telegram channel</li>
+        </ul>
+        <p class="text-sm text-red-600 mb-4">This action cannot be undone.</p>
+        <div class="flex justify-end gap-2">
+            <button onclick="closeDeleteModal()" class="modal-btn cancel-btn">Cancel</button>
+            <button onclick="confirmDelete()" class="modal-btn bg-red-600 hover:bg-red-700 text-white">Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Delete Confirmation Modal -->
+<div id="bulk-delete-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 theme-text">Delete <span id="bulk-delete-count">0</span> Files?</h3>
+        <p class="text-sm theme-text-secondary mb-2">
+            This will permanently delete:
+        </p>
+        <ul class="text-sm theme-text-secondary mb-4 list-disc list-inside">
+            <li>All selected files from database</li>
+            <li>All original messages from Telegram channel</li>
+        </ul>
+        <p class="text-sm text-red-600 mb-4">This action cannot be undone.</p>
+        <div class="flex justify-end gap-2">
+            <button onclick="closeBulkDeleteModal()" class="modal-btn cancel-btn">Cancel</button>
+            <button onclick="confirmBulkDelete()" class="modal-btn bg-red-600 hover:bg-red-700 text-white">Delete All</button>
+        </div>
+    </div>
+</div>
+
+<!-- Tidy Modal -->
+<div id="tidy-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 theme-text">Tidy Database</h3>
+        <p class="text-sm theme-text-secondary mb-4">
+            This will scan entries and remove those whose Telegram messages no longer exist.
+        </p>
+        
+        <!-- Tidy Target Selection -->
+        <div class="mb-4">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">What to tidy?</label>
+            <div class="flex flex-col gap-2">
+                <label class="flex items-center gap-2 cursor-pointer p-2 rounded border theme-option-label">
+                    <input type="radio" name="tidy-target" value="both" checked class="w-4 h-4">
+                    <span class="text-sm">📦 Both (Videos + Unsorted Files)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer p-2 rounded border theme-option-label">
+                    <input type="radio" name="tidy-target" value="videos" class="w-4 h-4">
+                    <span class="text-sm">🎬 Videos Only (Movies + TV)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer p-2 rounded border theme-option-label">
+                    <input type="radio" name="tidy-target" value="unsorted" class="w-4 h-4">
+                    <span class="text-sm">📁 Unsorted Files Only</span>
+                </label>
+            </div>
+        </div>
+        
+        <div class="flex justify-end gap-2">
+            <button onclick="closeTidyModal()" class="modal-btn cancel-btn">Cancel</button>
+            <button onclick="startTidy()" class="modal-btn confirm-btn">Start Tidy</button>
+        </div>
+    </div>
+</div>
+
+<!-- Scan Modal -->
+<div id="scan-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 theme-text">Scan for Files</h3>
+        <p class="text-sm theme-text-secondary mb-4">
+            This will scan channels for all file types (videos + non-videos).
+        </p>
+        
+        <!-- Channel Selection -->
+        <div class="mb-4">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">Channel</label>
+            <select id="scan-channel" class="modal-input">
+                <option value="all">All Channels</option>
+            </select>
+        </div>
+        
+        <!-- Mode Selection -->
+        <div class="mb-4">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">Scan Mode</label>
+            <div class="flex gap-2">
+                <button onclick="setScanMode('date')" id="mode-date-btn" class="mode-btn active">Date Range</button>
+                <button onclick="setScanMode('count')" id="mode-count-btn" class="mode-btn">Message Count</button>
+            </div>
+        </div>
+        
+        <!-- Date Options -->
+        <div id="date-options" class="mb-4">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">Time Period</label>
+            <select id="scan-date-preset" class="modal-input">
+                <option value="24h">Last 24 Hours</option>
+                <option value="7d" selected>Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+                <option value="90d">Last 90 Days</option>
+                <option value="all">All Time</option>
+            </select>
+        </div>
+        
+        <!-- Count Options -->
+        <div id="count-options" class="mb-4 hidden">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">Number of Messages</label>
+            <select id="scan-count" class="modal-input">
+                <option value="100">100 messages</option>
+                <option value="500" selected>500 messages</option>
+                <option value="1000">1000 messages</option>
+            </select>
+        </div>
+        
+        <div class="flex justify-end gap-2">
+            <button onclick="closeScanModal()" class="modal-btn cancel-btn">Cancel</button>
+            <button onclick="startScan()" class="modal-btn confirm-btn">Start Scan</button>
+        </div>
+    </div>
+</div>
+
+<!-- Progress Modal -->
+<div id="progress-modal" class="modal-overlay hidden">
+    <div class="modal-content progress-modal">
+        <div class="flex items-center gap-3 mb-4">
+            <div id="progress-icon" class="progress-spinner"></div>
+            <h3 id="progress-title" class="text-lg font-bold theme-text">Operation in Progress</h3>
+        </div>
+        
+        <div class="mb-4">
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div id="progress-details" class="progress-details-box mb-4">
+            <!-- Details will be populated by JS in text format -->
+            <p class="text-sm theme-text-secondary">Initializing...</p>
+        </div>
+        
+        <div class="flex justify-end gap-2">
+            <button onclick="cancelOperation()" id="cancel-op-btn" class="modal-btn cancel-btn">Cancel</button>
+            <button onclick="closeProgressModal()" id="close-progress-btn" class="modal-btn confirm-btn hidden">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== State =====
+let currentPage = 1;
+let currentSearch = '';
+let currentMediaType = '';
+let currentSort = 'created_on';
+let currentOrder = 'desc';
+let isLoading = false;
+
+// Page size with localStorage persistence
+const DEFAULT_PAGE_SIZE = 25;
+let pageSize = parseInt(localStorage.getItem('files_page_size')) || DEFAULT_PAGE_SIZE;
+
+// Column visibility with localStorage persistence
+const TOGGLEABLE_COLUMNS = ['source', 'quality', 'duration'];
+let columnVisibility = JSON.parse(localStorage.getItem('files_column_visibility')) || 
+    { source: true, quality: true, duration: true };
+
+// Column widths with localStorage persistence
+let columnWidths = JSON.parse(localStorage.getItem('files_column_widths')) || {};
+
+let selectedFiles = new Map(); // Map of id -> db_index for bulk delete
+let fileToDelete = null;
+let scanMode = 'date';
+let statusPollInterval = null;
+
+// ===== Type Icons =====
+const typeIcons = {
+    'archive': '<svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>',
+    'audio': '<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>',
+    'document': '<svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>',
+    'video': '<svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"/></svg>',
+    'other': '<svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>'
+};
+
+// ===== Helper Functions =====
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    const dateFormatted = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const timeFormatted = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    return `<div class="flex flex-col">
+        <span>${dateFormatted}</span>
+        <span class="text-xs theme-text-secondary">${timeFormatted}</span>
+    </div>`;
+}
+
+function formatSize(bytes) {
+    if (!bytes) return '-';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (bytes >= 1024 && i < units.length - 1) {
+        bytes /= 1024;
+        i++;
+    }
+    return bytes.toFixed(i > 0 ? 2 : 0) + ' ' + units[i];
+}
+
+function truncateText(text, maxLength) {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ===== UI Functions =====
+function showLoading() {
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('files-table-container').classList.add('hidden');
+    document.getElementById('no-results').classList.add('hidden');
+    document.getElementById('error-display').classList.add('hidden');
+    document.getElementById('pagination').classList.add('hidden');
+    document.getElementById('files-info').classList.add('hidden');
+}
+
+function hideLoading() {
+    document.getElementById('loading').classList.add('hidden');
+}
+
+function showError(message) {
+    hideLoading();
+    document.getElementById('error-message').textContent = message;
+    document.getElementById('error-display').classList.remove('hidden');
+}
+
+// ===== Data Loading =====
+async function loadFiles(page = 1) {
+    if (isLoading) return;
+    isLoading = true;
+    
+    showLoading();
+    currentPage = page;
+    
+    // Read current filter values
+    currentSearch = document.getElementById('search-input').value;
+    currentMediaType = document.getElementById('type-filter').value;
+    const sortValue = document.getElementById('sort-select').value.split(':');
+    currentSort = sortValue[0];
+    currentOrder = sortValue[1];
+    
+    // Save to localStorage
+    localStorage.setItem('files_sort', document.getElementById('sort-select').value);
+    localStorage.setItem('files_type', currentMediaType);
+    
+    try {
+        const url = `/api/files_unsorted?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(currentSearch)}&media_type=${currentMediaType}&sort=${currentSort}&order=${currentOrder}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch files');
+        
+        const data = await response.json();
+        
+        hideLoading();
+        
+        if (data.files && data.files.length > 0) {
+            renderFiles(data.files);
+            updatePagination(data.current_page, data.total_pages);
+            updateFilesInfo(data);
+            document.getElementById('files-table-container').classList.remove('hidden');
+            document.getElementById('bulk-actions').classList.remove('hidden');
+        } else {
+            document.getElementById('no-results').classList.remove('hidden');
+        }
+        
+    } catch (e) {
+        showError(e.message);
+    } finally {
+        isLoading = false;
+    }
+}
+
+function renderFiles(files) {
+    const tbody = document.getElementById('files-tbody');
+    tbody.innerHTML = '';
+    
+    files.forEach(file => {
+        const row = document.createElement('tr');
+        row.className = 'theme-table-row transition-colors';
+        row.id = `file-row-${file._id}`;
+        
+        const icon = typeIcons[file.media_type] || typeIcons['other'];
+        const isSelected = selectedFiles.has(file._id);
+        
+        // Source display
+        let sourceHtml = '<span class="theme-text-secondary">Direct Upload</span>';
+        if (file.source_channel_name) {
+            if (file.source_msg_link) {
+                sourceHtml = `<a href="${escapeHtml(file.source_msg_link)}" target="_blank" class="text-blue-600 hover:underline flex items-center gap-1" title="${escapeHtml(file.source_channel_name)}">
+                    <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                    <span class="truncate">${escapeHtml(file.source_channel_name)}</span>
+                </a>`;
+            } else {
+                sourceHtml = `<span class="theme-text-secondary truncate" title="${escapeHtml(file.source_channel_name)}">${escapeHtml(file.source_channel_name)}</span>`;
+            }
+        }
+        
+        // Quality badge
+        let qualityHtml = '<span class="theme-text-secondary">-</span>';
+        if (file.quality) {
+            let badgeClass = 'bg-gray-100 text-gray-700';
+            if (file.quality === '4K') badgeClass = 'bg-purple-100 text-purple-800';
+            else if (file.quality === '1080p') badgeClass = 'bg-blue-100 text-blue-800';
+            else if (file.quality === '720p') badgeClass = 'bg-green-100 text-green-800';
+            else if (file.quality === 'FLAC') badgeClass = 'bg-emerald-100 text-emerald-800';
+            qualityHtml = `<span class="px-2 py-0.5 rounded text-xs font-medium ${badgeClass}">${escapeHtml(file.quality)}</span>`;
+        }
+        
+        row.innerHTML = `
+            <td class="px-3 py-3">
+                <input type="checkbox" class="file-checkbox w-4 h-4 rounded" 
+                       data-id="${file._id}" data-db="${file.db_index}" 
+                       ${isSelected ? 'checked' : ''} 
+                       onchange="toggleFileSelection('${file._id}', ${file.db_index})">
+            </td>
+            <td class="px-3 py-3" data-column="type">${icon}</td>
+            <td class="px-3 py-3" data-column="filename">
+                <div class="flex flex-col min-w-0">
+                    <span class="font-medium text-sm truncate" title="${escapeHtml(file.file_name)}">${escapeHtml(file.file_name)}</span>
+                    ${file.caption ? `<span class="text-xs theme-text-secondary truncate" title="${escapeHtml(file.caption)}">${escapeHtml(file.caption)}</span>` : ''}
+                </div>
+            </td>
+            <td class="px-3 py-3 text-sm truncate" data-column="source">${sourceHtml}</td>
+            <td class="px-3 py-3" data-column="quality">${qualityHtml}</td>
+            <td class="px-3 py-3 text-sm theme-text-secondary" data-column="duration">${file.duration_formatted || '-'}</td>
+            <td class="px-3 py-3 text-sm theme-text-secondary" data-column="size">${file.size || '-'}</td>
+            <td class="px-3 py-2 text-sm" data-column="date">${formatDate(file.created_on)}</td>
+            <td class="px-3 py-3 text-right">
+                <div class="flex justify-end gap-1">
+                    <a href="${file.streaming_url}" target="_blank" 
+                       class="p-2 text-green-600 hover:opacity-80 rounded transition-colors" title="Download">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                    </a>
+                    <button onclick="deleteFile('${file._id}', ${file.db_index})" 
+                            class="p-2 text-red-600 hover:opacity-80 rounded transition-colors" title="Delete">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                    </button>
+                </div>
+            </td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+    
+    // Apply column visibility to newly rendered rows
+    applyColumnVisibility();
+}
+
+function updatePagination(currentPageNum, totalPages) {
+    const pagination = document.getElementById('pagination');
+    
+    if (totalPages <= 1) {
+        pagination.classList.add('hidden');
+        return;
+    }
+    
+    pagination.classList.remove('hidden');
+    let html = '';
+    
+    // Previous button
+    if (currentPageNum > 1) {
+        html += `<button onclick="loadFiles(${currentPageNum - 1})" class="px-3 py-2 border rounded-md theme-page-btn transition-colors text-sm">Previous</button>`;
+    }
+    
+    // Page numbers
+    const startPage = Math.max(1, currentPageNum - 2);
+    const endPage = Math.min(totalPages, currentPageNum + 2);
+    
+    if (startPage > 1) {
+        html += `<button onclick="loadFiles(1)" class="px-3 py-2 border rounded-md theme-page-btn transition-colors text-sm">1</button>`;
+        if (startPage > 2) html += `<span class="px-2 theme-text-secondary">...</span>`;
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+        const isActive = i === currentPageNum;
+        html += `<button onclick="loadFiles(${i})" class="px-3 py-2 border rounded-md transition-colors text-sm ${isActive ? 'theme-primary text-white' : 'theme-page-btn'}">${i}</button>`;
+    }
+    
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += `<span class="px-2 theme-text-secondary">...</span>`;
+        html += `<button onclick="loadFiles(${totalPages})" class="px-3 py-2 border rounded-md theme-page-btn transition-colors text-sm">${totalPages}</button>`;
+    }
+    
+    // Next button
+    if (currentPageNum < totalPages) {
+        html += `<button onclick="loadFiles(${currentPageNum + 1})" class="px-3 py-2 border rounded-md theme-page-btn transition-colors text-sm">Next</button>`;
+    }
+    
+    pagination.innerHTML = html;
+}
+
+function updateFilesInfo(data) {
+    const filesInfo = document.getElementById('files-info');
+    const resultsInfo = document.getElementById('results-info');
+    const dbInfo = document.getElementById('db-info');
+    
+    const startItem = ((data.current_page - 1) * pageSize) + 1;
+    const endItem = Math.min(data.current_page * pageSize, data.total_count);
+    
+    resultsInfo.textContent = `Showing ${startItem}-${endItem} of ${data.total_count} files`;
+    
+    if (data.databases_checked && data.databases_checked.length > 0) {
+        dbInfo.textContent = `Database${data.databases_checked.length > 1 ? 's' : ''}: ${data.databases_checked.join(', ')}`;
+    }
+    
+    filesInfo.classList.remove('hidden');
+    
+    // Show pagination container
+    document.getElementById('pagination-container').classList.remove('hidden');
+}
+
+// ===== Page Size =====
+function changePageSize(size) {
+    pageSize = parseInt(size);
+    localStorage.setItem('files_page_size', size);
+    currentPage = 1;
+    loadFiles(1);
+}
+
+// ===== Column Visibility =====
+function toggleColumnSettings() {
+    const dropdown = document.getElementById('column-settings-dropdown');
+    dropdown.classList.toggle('hidden');
+}
+
+function toggleColumnVisibility(columnName) {
+    columnVisibility[columnName] = !columnVisibility[columnName];
+    localStorage.setItem('files_column_visibility', JSON.stringify(columnVisibility));
+    applyColumnVisibility();
+}
+
+function applyColumnVisibility() {
+    TOGGLEABLE_COLUMNS.forEach(col => {
+        const isVisible = columnVisibility[col];
+        
+        // Update header
+        const header = document.querySelector(`th[data-column="${col}"]`);
+        if (header) {
+            header.style.display = isVisible ? '' : 'none';
+        }
+        
+        // Update all cells in that column
+        document.querySelectorAll(`td[data-column="${col}"]`).forEach(cell => {
+            cell.style.display = isVisible ? '' : 'none';
+        });
+        
+        // Update checkbox in settings
+        const checkbox = document.querySelector(`input[data-column-toggle="${col}"]`);
+        if (checkbox) {
+            checkbox.checked = isVisible;
+        }
+    });
+}
+
+// ===== Column Resize =====
+let resizingColumn = null;
+let resizeStartX = 0;
+let resizeStartWidth = 0;
+
+function initColumnResize() {
+    document.querySelectorAll('th.resizable').forEach(th => {
+        th.addEventListener('mousedown', (e) => {
+            // Only start resize if clicking near the right edge
+            const rect = th.getBoundingClientRect();
+            if (e.clientX > rect.right - 10) {
+                resizingColumn = th;
+                resizeStartX = e.pageX;
+                resizeStartWidth = th.offsetWidth;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            }
+        });
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (resizingColumn) {
+            const width = Math.max(50, resizeStartWidth + (e.pageX - resizeStartX));
+            resizingColumn.style.width = width + 'px';
+            resizingColumn.style.minWidth = width + 'px';
+        }
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (resizingColumn) {
+            saveColumnWidths();
+            resizingColumn = null;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+}
+
+function saveColumnWidths() {
+    const widths = {};
+    document.querySelectorAll('th[data-column]').forEach(th => {
+        if (th.style.width) {
+            widths[th.dataset.column] = th.style.width;
+        }
+    });
+    localStorage.setItem('files_column_widths', JSON.stringify(widths));
+}
+
+function restoreColumnWidths() {
+    Object.entries(columnWidths).forEach(([col, width]) => {
+        const header = document.querySelector(`th[data-column="${col}"]`);
+        if (header && width) {
+            header.style.width = width;
+            header.style.minWidth = width;
+        }
+    });
+}
+
+// Close column settings dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('column-settings-dropdown');
+    if (!dropdown) return;
+    
+    // Check if click is inside dropdown or on its toggle button
+    const toggleBtn = e.target.closest('[onclick*="toggleColumnSettings"]');
+    if (!dropdown.contains(e.target) && !toggleBtn) {
+        dropdown.classList.add('hidden');
+    }
+});
+
+// ===== Search =====
+function searchFiles() {
+    selectedFiles.clear();
+    updateSelectionUI();
+    loadFiles(1);
+}
+
+function clearSearch() {
+    document.getElementById('search-input').value = '';
+    document.getElementById('type-filter').value = '';
+    document.getElementById('sort-select').value = 'created_on:desc';
+    searchFiles();
+}
+
+// ===== Selection =====
+function toggleFileSelection(id, dbIndex) {
+    if (selectedFiles.has(id)) {
+        selectedFiles.delete(id);
+    } else {
+        selectedFiles.set(id, dbIndex);
+    }
+    updateSelectionUI();
+}
+
+function toggleSelectAll() {
+    const checkboxes = document.querySelectorAll('.file-checkbox');
+    const selectAll = document.getElementById('select-all');
+    const headerSelectAll = document.getElementById('header-select-all');
+    
+    // Determine if we should select or deselect based on current selection state
+    // If all are already selected, unselect all; otherwise select all
+    const shouldSelect = selectedFiles.size < checkboxes.length;
+    
+    if (shouldSelect) {
+        checkboxes.forEach(cb => {
+            cb.checked = true;
+            selectedFiles.set(cb.dataset.id, parseInt(cb.dataset.db));
+        });
+    } else {
+        checkboxes.forEach(cb => cb.checked = false);
+        selectedFiles.clear();
+    }
+    
+    // Sync both checkboxes to reflect current state
+    selectAll.checked = headerSelectAll.checked = shouldSelect;
+    updateSelectionUI();
+}
+
+function updateSelectionUI() {
+    const count = selectedFiles.size;
+    document.getElementById('selection-count').textContent = `${count} selected`;
+    
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    if (count > 0) {
+        bulkDeleteBtn.classList.remove('invisible');
+    } else {
+        bulkDeleteBtn.classList.add('invisible');
+    }
+    
+    // Update select all checkboxes
+    const checkboxes = document.querySelectorAll('.file-checkbox');
+    const allChecked = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+    document.getElementById('select-all').checked = allChecked;
+    document.getElementById('header-select-all').checked = allChecked;
+}
+
+// ===== Delete Operations =====
+function deleteFile(id, dbIndex) {
+    fileToDelete = { id, dbIndex };
+    document.getElementById('delete-modal').classList.remove('hidden');
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.add('hidden');
+    fileToDelete = null;
+}
+
+async function confirmDelete() {
+    if (!fileToDelete) return;
+    
+    // Store values before closing modal (which sets fileToDelete to null)
+    const { id, dbIndex } = fileToDelete;
+    closeDeleteModal();
+    
+    try {
+        const response = await fetch(`/api/files_unsorted/${id}?db_index=${dbIndex}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            // Remove row from UI
+            const row = document.getElementById(`file-row-${id}`);
+            if (row) row.remove();
+            selectedFiles.delete(id);
+            updateSelectionUI();
+            showToast('File deleted successfully', 'success');
+        } else {
+            showToast('Failed to delete file', 'error');
+        }
+    } catch (e) {
+        showToast('Error deleting file: ' + e.message, 'error');
+    }
+}
+
+function bulkDelete() {
+    if (selectedFiles.size === 0) return;
+    document.getElementById('bulk-delete-count').textContent = selectedFiles.size;
+    document.getElementById('bulk-delete-modal').classList.remove('hidden');
+}
+
+function closeBulkDeleteModal() {
+    document.getElementById('bulk-delete-modal').classList.add('hidden');
+}
+
+async function confirmBulkDelete() {
+    closeBulkDeleteModal();
+    
+    const files = [];
+    selectedFiles.forEach((dbIndex, id) => {
+        files.push({ id, db_index: dbIndex });
+    });
+    
+    try {
+        const response = await fetch('/api/files_unsorted/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Deleted ${data.deleted} files`, 'success');
+            selectedFiles.clear();
+            loadFiles(currentPage);
+        } else {
+            showToast('Failed to delete files', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// ===== Maintenance Modals =====
+function openTidyModal() {
+    document.getElementById('tidy-modal').classList.remove('hidden');
+}
+
+function closeTidyModal() {
+    document.getElementById('tidy-modal').classList.add('hidden');
+}
+
+async function openScanModal() {
+    try {
+        const response = await fetch('/api/maintenance/channels');
+        const data = await response.json();
+        
+        const select = document.getElementById('scan-channel');
+        select.innerHTML = '<option value="all">All Channels</option>';
+        
+        if (data.channels) {
+            data.channels.forEach(ch => {
+                const option = document.createElement('option');
+                option.value = ch.id;
+                option.textContent = ch.name;
+                select.appendChild(option);
+            });
+        }
+    } catch (e) {
+        console.error('Failed to load channels:', e);
+    }
+    
+    document.getElementById('scan-modal').classList.remove('hidden');
+}
+
+function closeScanModal() {
+    document.getElementById('scan-modal').classList.add('hidden');
+}
+
+function setScanMode(mode) {
+    scanMode = mode;
+    document.getElementById('mode-date-btn').classList.toggle('active', mode === 'date');
+    document.getElementById('mode-count-btn').classList.toggle('active', mode === 'count');
+    document.getElementById('date-options').classList.toggle('hidden', mode !== 'date');
+    document.getElementById('count-options').classList.toggle('hidden', mode !== 'count');
+}
+
+async function startTidy() {
+    // Get selected target before closing modal
+    const targetRadio = document.querySelector('input[name="tidy-target"]:checked');
+    const target = targetRadio ? targetRadio.value : 'both';
+    
+    const targetLabels = {
+        'both': 'Videos + Unsorted Files',
+        'videos': 'Videos Only',
+        'unsorted': 'Unsorted Files Only'
+    };
+    
+    closeTidyModal();
+    showProgressModal(`Tidy Database (${targetLabels[target]})`);
+    
+    try {
+        const response = await fetch('/api/maintenance/tidy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target })
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            startPollingStatus();
+        } else {
+            updateProgressError(data.error || 'Failed to start tidy');
+        }
+    } catch (e) {
+        updateProgressError('Failed to start tidy: ' + e.message);
+    }
+}
+
+async function startScan() {
+    const channel = document.getElementById('scan-channel').value;
+    const datePreset = document.getElementById('scan-date-preset').value;
+    const count = document.getElementById('scan-count').value;
+    
+    closeScanModal();
+    showProgressModal('Scan for Files');
+    
+    const body = {
+        channels: channel === 'all' ? null : [channel],
+        mode: scanMode,
+        date_preset: scanMode === 'date' ? datePreset : null,
+        limit: scanMode === 'count' ? parseInt(count) : null
+    };
+    
+    try {
+        // Use unified scan endpoint (processes both videos and non-videos)
+        const response = await fetch('/api/maintenance/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            startPollingStatus();
+        } else {
+            updateProgressError(data.error || 'Failed to start scan');
+        }
+    } catch (e) {
+        updateProgressError('Failed to start scan: ' + e.message);
+    }
+}
+
+// ===== Progress Modal =====
+function showProgressModal(title) {
+    document.getElementById('progress-title').textContent = title;
+    document.getElementById('progress-bar').style.width = '0%';
+    document.getElementById('progress-details').innerHTML = '<p class="text-sm theme-text-secondary">Initializing...</p>';
+    document.getElementById('cancel-op-btn').classList.remove('hidden');
+    document.getElementById('close-progress-btn').classList.add('hidden');
+    document.getElementById('progress-modal').classList.remove('hidden');
+}
+
+function closeProgressModal() {
+    document.getElementById('progress-modal').classList.add('hidden');
+    if (statusPollInterval) {
+        clearInterval(statusPollInterval);
+        statusPollInterval = null;
+    }
+    loadFiles(currentPage);
+}
+
+function updateProgressError(message) {
+    document.getElementById('progress-details').innerHTML = `<p class="text-sm text-red-500">Error: ${escapeHtml(message)}</p>`;
+    document.getElementById('cancel-op-btn').classList.add('hidden');
+    document.getElementById('close-progress-btn').classList.remove('hidden');
+}
+
+function startPollingStatus() {
+    statusPollInterval = setInterval(async () => {
+        try {
+            // Use unified status endpoint
+            const response = await fetch('/api/maintenance/status');
+            const data = await response.json();
+            
+            if (data.status === 'running') {
+                // Calculate progress
+                let progress = 0;
+                if (data.operation_type === 'tidy' && data.total_items > 0) {
+                    progress = Math.round((data.processed_items / data.total_items) * 100);
+                } else if (data.operation_type === 'scan' && data.total_items > 0) {
+                    progress = Math.min(95, Math.round((data.processed_items / data.total_items) * 100));
+                } else if (data.checked > 0 || data.processed_items > 0) {
+                    progress = Math.min(90, 20 + ((data.checked || data.processed_items) % 70));
+                }
+                
+                document.getElementById('progress-bar').style.width = `${progress}%`;
+                
+                // Build detailed HTML using buildDetailsHtml
+                const detailsHtml = buildDetailsHtml(data);
+                document.getElementById('progress-details').innerHTML = detailsHtml;
+                
+            } else if (data.status === 'completed' || data.status === 'cancelled') {
+                clearInterval(statusPollInterval);
+                statusPollInterval = null;
+                document.getElementById('progress-bar').style.width = '100%';
+                
+                // Update spinner to checkmark or X
+                const icon = document.getElementById('progress-icon');
+                icon.className = '';
+                icon.innerHTML = data.status === 'completed' ? '✅' : '⏹️';
+                icon.style.fontSize = '24px';
+                
+                // Update title
+                const title = data.status === 'cancelled' ? 'Operation Cancelled' : 'Operation Complete';
+                document.getElementById('progress-title').textContent = title;
+                
+                // Show final details
+                const detailsHtml = buildDetailsHtml(data);
+                document.getElementById('progress-details').innerHTML = detailsHtml;
+                
+                document.getElementById('cancel-op-btn').classList.add('hidden');
+                document.getElementById('close-progress-btn').classList.remove('hidden');
+            } else if (data.status === 'error') {
+                clearInterval(statusPollInterval);
+                statusPollInterval = null;
+                updateProgressError(data.error_message || 'Unknown error');
+            } else if (data.status === 'idle') {
+                // Operation hasn't started yet, keep polling
+                document.getElementById('progress-details').innerHTML = '<p class="text-sm theme-text-secondary">Starting...</p>';
+            }
+        } catch (e) {
+            console.error('Status poll error:', e);
+        }
+    }, 1000);
+}
+
+async function cancelOperation() {
+    try {
+        // Use unified cancel endpoint
+        await fetch('/api/maintenance/cancel', { method: 'POST' });
+    } catch (e) {
+        console.error('Cancel error:', e);
+    }
+}
+
+// ===== Progress Details Functions =====
+function formatElapsed(seconds) {
+    if (!seconds) return '0s';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    if (mins > 0) {
+        return `${mins}m ${secs}s`;
+    }
+    return `${secs}s`;
+}
+
+function buildDetailsHtml(data) {
+    const elapsed = formatElapsed(data.elapsed_seconds);
+    
+    if (data.operation_type === 'tidy') {
+        const statusLine = data.status === 'running' 
+            ? `<div class="detail-status">🔄 Processing... ${data.current_step || ''}</div>`
+            : '';
+        
+        // Show target if available
+        const targetLine = data.tidy_target && data.mode_label
+            ? `<div class="detail-row"><span class="detail-label">🎯 Target:</span><span class="detail-value">${data.mode_label}</span></div>`
+            : '';
+        
+        // Build removed breakdown if target is "both"
+        let removedSection = `<div class="detail-row">
+            <span class="detail-label">🗑️ Entries removed:</span>
+            <span class="detail-value ${data.removed > 0 ? 'text-red' : ''}">${data.removed.toLocaleString()}</span>
+        </div>`;
+        
+        if (data.tidy_target === 'both' && data.removed > 0) {
+            removedSection += `
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">├─ 🎬 Videos:</span>
+                    <span class="detail-value">${(data.videos_removed || 0).toLocaleString()}</span>
+                </div>
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">└─ 📁 Unsorted:</span>
+                    <span class="detail-value">${(data.unsorted_removed || 0).toLocaleString()}</span>
+                </div>
+            `;
+        }
+        
+        return `
+            ${statusLine}
+            <div class="detail-section">
+                ${targetLine}
+                <div class="detail-row">
+                    <span class="detail-label">📊 Items scanned:</span>
+                    <span class="detail-value">${data.processed_items.toLocaleString()} / ${data.total_items.toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">🔍 Entries checked:</span>
+                    <span class="detail-value">${data.checked.toLocaleString()}</span>
+                </div>
+                ${removedSection}
+                <div class="detail-row">
+                    <span class="detail-label">⏱️ Time:</span>
+                    <span class="detail-value">${elapsed}</span>
+                </div>
+            </div>
+        `;
+    } else if (data.operation_type === 'scan') {
+        const unsortedAdded = data.unsorted_added || 0;
+        const totalAdded = data.movies_added + data.tv_added + unsortedAdded;
+        const channelLine = data.channel_name ? `<div class="detail-row"><span class="detail-label">📊 Channel:</span><span class="detail-value">${data.channel_name}</span></div>` : '';
+        const modeLine = data.mode_label ? `<div class="detail-row"><span class="detail-label">📅 Mode:</span><span class="detail-value">${data.mode_label}</span></div>` : '';
+        const targetLine = `<div class="detail-row"><span class="detail-label">🎯 Target:</span><span class="detail-value">Videos + Unsorted Files</span></div>`;
+        
+        const statusLine = data.status === 'running' 
+            ? `<div class="detail-status">🔍 Scanning... ${data.processed_items.toLocaleString()} messages checked</div>`
+            : '';
+        
+        let addedSection = `<div class="detail-row"><span class="detail-label">📁 New files added:</span><span class="detail-value ${totalAdded > 0 ? 'text-green' : ''}">${totalAdded}</span></div>`;
+        
+        if (totalAdded > 0) {
+            addedSection += `
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">├─ 🎬 Movies:</span>
+                    <span class="detail-value">${data.movies_added}</span>
+                </div>
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">├─ 📺 TV Episodes:</span>
+                    <span class="detail-value">${data.tv_added}</span>
+                </div>
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">└─ 📁 Unsorted:</span>
+                    <span class="detail-value">${unsortedAdded}</span>
+                </div>
+            `;
+        }
+        
+        return `
+            ${statusLine}
+            <div class="detail-section">
+                ${channelLine}
+                ${modeLine}
+                ${targetLine}
+                <div class="detail-row">
+                    <span class="detail-label">📊 Messages checked:</span>
+                    <span class="detail-value">${data.checked.toLocaleString()}</span>
+                </div>
+                ${addedSection}
+                <div class="detail-row">
+                    <span class="detail-label">⏭️ Already processed:</span>
+                    <span class="detail-value">${data.already_processed.toLocaleString()}</span>
+                </div>
+                ${data.already_processed > 0 ? `
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">├─ 🎬 Videos:</span>
+                    <span class="detail-value">${(data.already_processed_videos || 0).toLocaleString()}</span>
+                </div>
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">└─ 📁 Unsorted:</span>
+                    <span class="detail-value">${(data.already_processed_unsorted || 0).toLocaleString()}</span>
+                </div>
+                ` : ''}
+                <div class="detail-row">
+                    <span class="detail-label">🚫 Skipped (no media or file):</span>
+                    <span class="detail-value">${(data.skipped_no_file || 0).toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">⚠️ Failed (metadata), moved to unsorted:</span>
+                    <span class="detail-value">${(data.failed_metadata || 0).toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">⏱️ Time:</span>
+                    <span class="detail-value">${elapsed}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Default fallback
+    return `<p class="text-sm theme-text-secondary">${data.current_step || 'Processing...'}</p>`;
+}
+
+// ===== Toast Notification =====
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+    toast.className = `fixed bottom-4 right-4 ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center`;
+    
+    const icon = type === 'success' 
+        ? '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
+        : '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
+    
+    toast.innerHTML = icon + `<span class="text-sm">${escapeHtml(message)}</span>`;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        if (document.body.contains(toast)) {
+            document.body.removeChild(toast);
+        }
+    }, 3000);
+}
+
+// ===== Initialize =====
+document.addEventListener('DOMContentLoaded', () => {
+    // Restore saved preferences
+    const savedSort = localStorage.getItem('files_sort');
+    const savedType = localStorage.getItem('files_type');
+    
+    if (savedSort) document.getElementById('sort-select').value = savedSort;
+    if (savedType) document.getElementById('type-filter').value = savedType;
+    
+    // Restore page size
+    document.getElementById('page-size-select').value = pageSize;
+    
+    // Initialize column resize
+    initColumnResize();
+    
+    // Restore column widths
+    restoreColumnWidths();
+    
+    // Apply column visibility
+    applyColumnVisibility();
+    
+    // Load files
+    loadFiles();
+    
+    // Enter key on search
+    document.getElementById('search-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            searchFiles();
+        }
+    });
+});
+</script>
+
+<style>
+.maintenance-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.tidy-btn {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    color: white;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+.tidy-btn:hover {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.scan-btn {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: white;
+    border-color: rgba(59, 130, 246, 0.3);
+}
+.scan-btn:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* Theme-aware form elements */
+.theme-input {
+    background: var(--theme-card);
+    color: var(--theme-text);
+    border-color: rgba(128, 128, 128, 0.3);
+}
+.theme-input:focus {
+    border-color: var(--theme-primary);
+}
+.theme-input option {
+    background: var(--theme-card);
+    color: var(--theme-text);
+}
+
+/* Theme-aware table */
+.theme-table-header {
+    background: rgba(128, 128, 128, 0.1);
+}
+.theme-table-header th {
+    color: var(--theme-text-secondary);
+}
+.theme-table-body {
+    background: var(--theme-card);
+}
+.theme-table-body tr {
+    border-color: rgba(128, 128, 128, 0.15);
+}
+.theme-table-row:hover {
+    background: rgba(128, 128, 128, 0.08);
+}
+
+/* Theme-aware pagination */
+.theme-page-btn {
+    background: var(--theme-card);
+    border-color: rgba(128, 128, 128, 0.3);
+    color: var(--theme-text);
+}
+.theme-page-btn:hover:not(.active) {
+    background: rgba(128, 128, 128, 0.1);
+}
+
+/* Resizable columns */
+th.resizable {
+    position: relative;
+    user-select: none;
+    padding-right: 14px !important; /* Space for resize handle */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+th.resizable::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 25%;
+    width: 4px;
+    height: 50%;
+    cursor: col-resize;
+    background: rgba(128, 128, 128, 0.2);
+    border-radius: 2px;
+}
+th.resizable:hover::after {
+    background: rgba(128, 128, 128, 0.5);
+}
+
+/* Table layout with fixed column widths */
+#files-table-container table {
+    table-layout: fixed;
+    width: 100%;
+}
+#files-table-container td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 0; /* Forces cell to respect column width */
+}
+#files-table-container td[data-column="date"],
+#files-table-container td[data-column="filename"] {
+    white-space: normal; /* Allow multi-line content */
+}
+#files-table-container td .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#files-table-container td .flex-col {
+    min-width: 0;
+}
+#files-table-container td .flex-col > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Theme-aware radio/checkbox labels */
+.theme-option-label {
+    border-color: rgba(128, 128, 128, 0.3);
+}
+.theme-option-label:hover {
+    background: rgba(128, 128, 128, 0.08);
+}
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+}
+
+.modal-overlay:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal-content {
+    background-color: var(--theme-card);
+    color: var(--theme-text);
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    max-width: 28rem;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-btn {
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.cancel-btn {
+    background-color: transparent;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    color: var(--theme-text-secondary);
+}
+.cancel-btn:hover {
+    background-color: rgba(128, 128, 128, 0.1);
+}
+
+.confirm-btn {
+    background-color: #3b82f6;
+    color: white;
+}
+.confirm-btn:hover {
+    background-color: #2563eb;
+}
+
+.modal-input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    background: var(--theme-background);
+    color: var(--theme-text);
+}
+.modal-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.mode-btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    background-color: transparent;
+    color: var(--theme-text-secondary);
+    transition: all 0.2s;
+}
+.mode-btn:hover {
+    background-color: rgba(128, 128, 128, 0.1);
+}
+.mode-btn.active {
+    background-color: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+}
+
+/* Progress Modal Styles */
+.progress-modal {
+    max-width: 500px;
+}
+
+/* Progress Bar */
+.progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(128, 128, 128, 0.2);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+/* Progress Details Box */
+.progress-details-box {
+    background: rgba(128, 128, 128, 0.1);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+}
+
+.detail-status {
+    color: var(--theme-text);
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    font-weight: 500;
+}
+
+.detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--theme-text-secondary);
+}
+
+.detail-row.detail-indent {
+    padding-left: 16px;
+    font-size: 12px;
+}
+
+.detail-label {
+    color: var(--theme-text-secondary);
+}
+
+.detail-value {
+    color: var(--theme-text);
+    font-weight: 600;
+}
+
+.detail-value.text-green {
+    color: #22c55e;
+}
+
+.detail-value.text-red {
+    color: #ef4444;
+}
+
+/* Progress Spinner */
+.progress-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(59, 130, 246, 0.2);
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+</style>
+{% endblock %}
+
