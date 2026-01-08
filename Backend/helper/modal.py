@@ -11,7 +11,7 @@ class QualityDetail(BaseModel):
     name: str
     size: str
     # Additional fields for custom API endpoints (populated by receiver and backfill script)
-    sizeInBytes: Optional[int] = None
+    size_bytes: Optional[int] = None
     updated_on: Optional[str] = None
     created_on: Optional[str] = None
 

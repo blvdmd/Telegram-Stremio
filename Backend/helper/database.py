@@ -200,7 +200,7 @@ class Database:
                     id=metadata_info['encoded_string'],
                     name=name,
                     size=size,
-                    sizeInBytes=metadata_info.get('file_size_bytes'),
+                    size_bytes=metadata_info.get('file_size_bytes'),
                     updated_on=metadata_info.get('telegram_date'),
                     created_on=metadata_info.get('telegram_date')
                 )]
@@ -235,7 +235,7 @@ class Database:
                             id=metadata_info['encoded_string'],
                             name=name,
                             size=size,
-                            sizeInBytes=metadata_info.get('file_size_bytes'),
+                            size_bytes=metadata_info.get('file_size_bytes'),
                             updated_on=metadata_info.get('telegram_date'),
                             created_on=metadata_info.get('telegram_date')
                         )]

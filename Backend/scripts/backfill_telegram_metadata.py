@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Backfill script to populate existing telegram objects with sizeInBytes, updated_on, and created_on.
+Backfill script to populate existing telegram objects with size_bytes, updated_on, and created_on.
 
 This script:
-1. Connects to the database
+1. Migrates existing 'sizeInBytes' fields to 'size_bytes' (one-time migration)
 2. Iterates through all movies and TV shows
 3. For each telegram object, decodes the ID to get chat_id and msg_id
 4. Fetches the message from Telegram to get file_size and message.date
@@ -22,11 +22,81 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from datetime import datetime
 from pyrogram import Client
 from Backend.config import Telegram
 from Backend.helper.database import Database
 from Backend.helper.encrypt import decode_string
+from Backend.helper.pyro import to_utc_isoformat
 from Backend.logger import LOGGER
+
+
+async def migrate_size_field(db: Database):
+    """
+    One-time migration: Rename 'sizeInBytes' to 'size_bytes' in all telegram objects.
+    This handles the field naming convention change.
+    """
+    LOGGER.info("=" * 60)
+    LOGGER.info("Starting Field Migration: sizeInBytes -> size_bytes")
+    LOGGER.info("=" * 60)
+    
+    total_storage_dbs = len(db.dbs) - 1  # Exclude tracking db
+    total_movies_updated = 0
+    total_tv_updated = 0
+    
+    for db_index in range(1, total_storage_dbs + 1):
+        db_key = f"storage_{db_index}"
+        LOGGER.info(f"\n--- Migrating {db_key} ---")
+        
+        movies_in_db = 0
+        tv_in_db = 0
+        
+        # Migrate movies: rename telegram[].sizeInBytes to telegram[].size_bytes
+        # Note: MongoDB $rename doesn't work with array positional operators, so we iterate manually
+        movie_collection = db.dbs[db_key]["movie"]
+        movies_cursor = movie_collection.find({"telegram.sizeInBytes": {"$exists": True}})
+        async for movie in movies_cursor:
+            telegram_list = movie.get('telegram', [])
+            updated = False
+            for item in telegram_list:
+                if 'sizeInBytes' in item:
+                    item['size_bytes'] = item.pop('sizeInBytes')
+                    updated = True
+            if updated:
+                await movie_collection.update_one(
+                    {"_id": movie["_id"]},
+                    {"$set": {"telegram": telegram_list}}
+                )
+                movies_in_db += 1
+                total_movies_updated += 1
+        
+        LOGGER.info(f"[{db_key}] Migrated {movies_in_db} movies")
+        
+        # Migrate TV shows: rename seasons[].episodes[].telegram[].sizeInBytes
+        # Note: MongoDB $rename doesn't work with nested arrays, so we iterate manually
+        tv_collection = db.dbs[db_key]["tv"]
+        tv_cursor = tv_collection.find({"seasons.episodes.telegram.sizeInBytes": {"$exists": True}})
+        async for tv_show in tv_cursor:
+            seasons = tv_show.get('seasons', [])
+            updated = False
+            for season in seasons:
+                for episode in season.get('episodes', []):
+                    for item in episode.get('telegram', []):
+                        if 'sizeInBytes' in item:
+                            item['size_bytes'] = item.pop('sizeInBytes')
+                            updated = True
+            if updated:
+                await tv_collection.update_one(
+                    {"_id": tv_show["_id"]},
+                    {"$set": {"seasons": seasons}}
+                )
+                tv_in_db += 1
+                total_tv_updated += 1
+        
+        LOGGER.info(f"[{db_key}] Migrated {tv_in_db} TV shows")
+    
+    LOGGER.info(f"\nMigration complete: {total_movies_updated} movies, {total_tv_updated} TV shows updated")
+    LOGGER.info("=" * 60)
 
 
 async def backfill_movie_telegram_metadata(db: Database, bot: Client, movie: dict, db_key: str):
@@ -37,7 +107,7 @@ async def backfill_movie_telegram_metadata(db: Database, bot: Client, movie: dic
     
     for telegram_item in telegram_list:
         # Skip if already has the metadata
-        if telegram_item.get('sizeInBytes') is not None:
+        if telegram_item.get('size_bytes') is not None:
             continue
             
         telegram_id = telegram_item.get('id')
@@ -54,10 +124,10 @@ async def backfill_movie_telegram_metadata(db: Database, bot: Client, movie: dic
             if message and (message.video or message.document):
                 file = message.video or message.document
                 
-                # Update telegram item with metadata
-                telegram_item['sizeInBytes'] = file.file_size
-                telegram_item['created_on'] = message.date.isoformat() if message.date else None
-                telegram_item['updated_on'] = message.date.isoformat() if message.date else None
+                # Update telegram item with metadata (using consistent UTC format)
+                telegram_item['size_bytes'] = file.file_size
+                telegram_item['created_on'] = to_utc_isoformat(message.date)
+                telegram_item['updated_on'] = to_utc_isoformat(message.date)
                 updated = True
                 
                 LOGGER.info(f"[Movie] Updated metadata for {movie.get('title')} - {telegram_item.get('quality')}")
@@ -93,7 +163,7 @@ async def backfill_tv_telegram_metadata(db: Database, bot: Client, tv_show: dict
             
             for telegram_item in telegram_list:
                 # Skip if already has the metadata
-                if telegram_item.get('sizeInBytes') is not None:
+                if telegram_item.get('size_bytes') is not None:
                     continue
                     
                 telegram_id = telegram_item.get('id')
@@ -110,10 +180,10 @@ async def backfill_tv_telegram_metadata(db: Database, bot: Client, tv_show: dict
                     if message and (message.video or message.document):
                         file = message.video or message.document
                         
-                        # Update telegram item with metadata
-                        telegram_item['sizeInBytes'] = file.file_size
-                        telegram_item['created_on'] = message.date.isoformat() if message.date else None
-                        telegram_item['updated_on'] = message.date.isoformat() if message.date else None
+                        # Update telegram item with metadata (using consistent UTC format)
+                        telegram_item['size_bytes'] = file.file_size
+                        telegram_item['created_on'] = to_utc_isoformat(message.date)
+                        telegram_item['updated_on'] = to_utc_isoformat(message.date)
                         updated = True
                         
                         LOGGER.info(
@@ -155,6 +225,9 @@ async def main():
     # Initialize database
     db = Database()
     await db.connect()
+    
+    # Step 1: Run one-time field migration (sizeInBytes -> size_bytes)
+    await migrate_size_field(db)
     
     # Initialize Telegram bot client
     bot = Client(
@@ -204,4 +277,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

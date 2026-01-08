@@ -69,7 +69,7 @@ def enrich_telegram_object_inplace(telegram_item: dict, base_url: str) -> None:
         telegram_item["name"] = sanitize_filename(telegram_item["name"])
     
     # Set defaults only if not present
-    telegram_item.setdefault("sizeInBytes", None)
+    telegram_item.setdefault("size_bytes", None)
     telegram_item.setdefault("updated_on", None)
     telegram_item.setdefault("created_on", None)
 
