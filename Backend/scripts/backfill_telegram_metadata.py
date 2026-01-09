@@ -121,9 +121,18 @@ async def backfill_movie_telegram_metadata(db: Database, bot: Client, movie: dic
             
             # Fetch message from Telegram
             message = await bot.get_messages(chat_id, msg_id)
-            if message and (message.video or message.document):
-                file = message.video or message.document
-                
+            
+            # Support all media types (video, document, audio, voice, video_note, animation)
+            file = (
+                message.document or
+                message.video or
+                message.audio or
+                message.voice or
+                message.video_note or
+                message.animation
+            ) if message else None
+            
+            if file:
                 # Update telegram item with metadata (using consistent UTC format)
                 telegram_item['size_bytes'] = file.file_size
                 telegram_item['created_on'] = to_utc_isoformat(message.date)
@@ -177,9 +186,18 @@ async def backfill_tv_telegram_metadata(db: Database, bot: Client, tv_show: dict
                     
                     # Fetch message from Telegram
                     message = await bot.get_messages(chat_id, msg_id)
-                    if message and (message.video or message.document):
-                        file = message.video or message.document
-                        
+                    
+                    # Support all media types (video, document, audio, voice, video_note, animation)
+                    file = (
+                        message.document or
+                        message.video or
+                        message.audio or
+                        message.voice or
+                        message.video_note or
+                        message.animation
+                    ) if message else None
+                    
+                    if file:
                         # Update telegram item with metadata (using consistent UTC format)
                         telegram_item['size_bytes'] = file.file_size
                         telegram_item['created_on'] = to_utc_isoformat(message.date)
