@@ -114,6 +114,7 @@ async def stream_movies_json(base_url: str, search: str = "", genre: str = "") -
     """
     Async generator that streams movies as JSON array.
     Memory efficient - processes documents one at a time using cursor batching.
+    Sorted by updated_on descending (newest first) using index.
     """
     filter_dict = build_filter(search, genre)
     
@@ -124,7 +125,8 @@ async def stream_movies_json(base_url: str, search: str = "", genre: str = "") -
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["movie"]
         
-        async for doc in collection.find(filter_dict).batch_size(100):
+        # Sort by updated_on descending (newest first) - uses index for performance
+        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
@@ -140,6 +142,7 @@ async def stream_tv_shows_json(base_url: str, search: str = "", genre: str = "")
     """
     Async generator that streams TV shows as JSON array.
     Memory efficient - processes documents one at a time using cursor batching.
+    Sorted by updated_on descending (newest first) using index.
     """
     filter_dict = build_filter(search, genre)
     
@@ -150,7 +153,8 @@ async def stream_tv_shows_json(base_url: str, search: str = "", genre: str = "")
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["tv"]
         
-        async for doc in collection.find(filter_dict).batch_size(100):
+        # Sort by updated_on descending (newest first) - uses index for performance
+        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
@@ -165,18 +169,19 @@ async def stream_all_media_json(base_url: str, search: str = "", genre: str = ""
     """
     Async generator that streams both movies and TV shows as JSON.
     Memory efficient - processes documents one at a time using cursor batching.
+    Sorted by updated_on descending (newest first) using index.
     """
     filter_dict = build_filter(search, genre)
     
     yield '{"movies":['
     first = True
     
-    # Stream movies
+    # Stream movies - sorted by updated_on descending (newest first)
     for i in range(1, db.current_db_index + 1):
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["movie"]
         
-        async for doc in collection.find(filter_dict).batch_size(100):
+        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
@@ -187,12 +192,12 @@ async def stream_all_media_json(base_url: str, search: str = "", genre: str = ""
     yield '],"tv_shows":['
     first = True
     
-    # Stream TV shows
+    # Stream TV shows - sorted by updated_on descending (newest first)
     for i in range(1, db.current_db_index + 1):
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["tv"]
         
-        async for doc in collection.find(filter_dict).batch_size(100):
+        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
