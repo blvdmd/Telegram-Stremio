@@ -9,6 +9,7 @@ from Backend.fastapi.routes.stream_routes import router as stream_router
 from Backend.fastapi.routes.stremio_routes import router as stremio_router
 from Backend.fastapi.routes.custom_routes import router as custom_router
 from Backend.fastapi.routes.maintenance_routes import router as maintenance_router
+from Backend.fastapi.routes.unsorted_routes import router as unsorted_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page
@@ -48,6 +49,7 @@ app.include_router(stream_router)
 app.include_router(stremio_router)
 app.include_router(custom_router)
 app.include_router(maintenance_router)
+app.include_router(unsorted_router)  # Unsorted files API
 
 # --- Public Routes (No Authentication Required) ---
 @app.get("/login", response_class=HTMLResponse)
@@ -82,6 +84,21 @@ async def play_browse(request: Request, media_type: str = "movie"):
 @app.get("/play/files", response_class=HTMLResponse)
 async def play_files(request: Request, tmdb_id: int, db_index: int, media_type: str):
     return await play_files_page(request, tmdb_id, db_index, media_type)
+
+# --- Files Route (Public - Unsorted Files) ---
+@app.get("/files", response_class=HTMLResponse)
+async def files_browse(request: Request):
+    from fastapi.templating import Jinja2Templates
+    from Backend.fastapi.themes import get_theme, get_all_themes
+    templates = Jinja2Templates(directory="Backend/fastapi/templates")
+    theme_name = request.session.get("theme", "purple_gradient")
+    return templates.TemplateResponse("files_browse.html", {
+        "request": request,
+        "theme": get_theme(theme_name),
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": request.session.get("username")
+    })
 
 # --- Protected Routes (Authentication Required) ---
 @app.get("/", response_class=HTMLResponse)

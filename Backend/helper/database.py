@@ -60,6 +60,9 @@ class Database:
                 self.current_db_index = state["current_index"]
 
             LOGGER.info(f"Active storage DB: storage_{self.current_db_index}")
+            
+            # Ensure indexes for optimal query performance
+            await self._ensure_indexes()
 
         except Exception as e:
             LOGGER.error(f"Database connection error: {e}")
@@ -76,6 +79,31 @@ class Database:
             upsert=True
         )
 
+    async def _ensure_indexes(self):
+        """
+        Create indexes for optimal query performance.
+        Indexes are idempotent - MongoDB will skip if they already exist.
+        """
+        total_storage_dbs = len(self.dbs) - 1  # Exclude tracking db
+        
+        for db_index in range(1, total_storage_dbs + 1):
+            db_key = f"storage_{db_index}"
+            db = self.dbs[db_key]
+            
+            try:
+                # Movie collection indexes
+                await db["movie"].create_index([("updated_on", DESCENDING)])
+                await db["movie"].create_index([("tmdb_id", ASCENDING)])
+                await db["movie"].create_index([("imdb_id", ASCENDING)])
+                
+                # TV collection indexes
+                await db["tv"].create_index([("updated_on", DESCENDING)])
+                await db["tv"].create_index([("tmdb_id", ASCENDING)])
+                await db["tv"].create_index([("imdb_id", ASCENDING)])
+                
+                LOGGER.info(f"[{db_key}] Indexes ensured for movie and tv collections")
+            except Exception as e:
+                LOGGER.warning(f"[{db_key}] Index creation warning: {e}")
 
     # -------------------------------
     # Helper Methods for Repeated Logic
@@ -200,7 +228,7 @@ class Database:
                     id=metadata_info['encoded_string'],
                     name=name,
                     size=size,
-                    sizeInBytes=metadata_info.get('file_size_bytes'),
+                    size_bytes=metadata_info.get('file_size_bytes'),
                     updated_on=metadata_info.get('telegram_date'),
                     created_on=metadata_info.get('telegram_date')
                 )]
@@ -235,7 +263,7 @@ class Database:
                             id=metadata_info['encoded_string'],
                             name=name,
                             size=size,
-                            sizeInBytes=metadata_info.get('file_size_bytes'),
+                            size_bytes=metadata_info.get('file_size_bytes'),
                             updated_on=metadata_info.get('telegram_date'),
                             created_on=metadata_info.get('telegram_date')
                         )]

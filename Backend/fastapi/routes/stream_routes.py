@@ -44,7 +44,20 @@ async def stream_handler(request: Request, id: str, name: str):
 
     chat_id = f"-100{decoded_data['chat_id']}"
     message = await StreamBot.get_messages(int(chat_id), int(decoded_data["msg_id"]))
-    file = message.video or message.document
+    
+    # Support all media types (video, document, audio, voice, video_note, animation)
+    file = (
+        message.document or
+        message.video or
+        message.audio or
+        message.voice or
+        message.video_note or
+        message.animation
+    )
+    
+    if not file:
+        raise HTTPException(status_code=404, detail="No streamable file found in message")
+    
     file_hash = file.file_unique_id[:6]
 
     return await media_streamer(

@@ -1,5 +1,6 @@
 from pyrogram.file_id import FileId
 from typing import Optional
+from datetime import datetime
 from Backend.logger import LOGGER
 from Backend import __version__, now, timezone
 from Backend.config import Telegram
@@ -11,6 +12,24 @@ from Backend.pyrofork.bot import StreamBot
 import re
 from pyrogram.types import BotCommand
 from pyrogram import enums
+
+
+def to_utc_isoformat(dt) -> Optional[str]:
+    """
+    Convert datetime to naive UTC ISO format string with microseconds.
+    Handles both timezone-aware and naive datetimes consistently.
+    
+    Args:
+        dt: datetime object (can be None, timezone-aware, or naive)
+    
+    Returns:
+        ISO format string like '2026-01-09T12:30:45.123000' or None
+    """
+    if dt is None:
+        return None
+    # Use timestamp to get UTC regardless of timezone awareness
+    utc_dt = datetime.utcfromtimestamp(dt.timestamp())
+    return utc_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')
 
 
 def is_media(message):
@@ -142,10 +161,12 @@ async def restart_notification():
 
 
 # Bot commands
+# Note: /scan_files now processes both video AND non-video files in one pass
+# Note: /tidy now shows options to tidy: Both, Videos Only, or Unsorted Files Only
 commands = [
     BotCommand("start", "🚀 Start the bot"),
-    BotCommand("scan_files", "🔍📂 Scan channels for missed files"),
-    BotCommand("tidy", "🧹 Remove orphaned/invalid entries"),
+    BotCommand("scan_files", "🔍 Scan channels for all files"),
+    BotCommand("tidy", "🧹 Clean orphaned entries"),
     BotCommand("set", "🎬 Manually add IMDb metadata"),
     BotCommand("fixmetadata", "⚙️ Fix empty fields of Metadata"),
     BotCommand("log", "📄 Send the log file"),

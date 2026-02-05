@@ -127,8 +127,28 @@
     <div class="modal-content">
         <h3 class="text-lg font-bold mb-4 theme-text">Tidy Database</h3>
         <p class="text-sm theme-text-secondary mb-4">
-            This will scan all entries and remove those whose Telegram messages no longer exist.
+            This will scan entries and remove those whose Telegram messages no longer exist.
         </p>
+        
+        <!-- Tidy Target Selection -->
+        <div class="mb-4">
+            <label class="block text-sm font-medium theme-text-secondary mb-2">What to tidy?</label>
+            <div class="flex flex-col gap-2">
+                <label class="flex items-center gap-2 cursor-pointer p-2 rounded border hover:bg-gray-50">
+                    <input type="radio" name="tidy-target" value="both" checked class="w-4 h-4">
+                    <span class="text-sm">📦 Both (Videos + Unsorted Files)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer p-2 rounded border hover:bg-gray-50">
+                    <input type="radio" name="tidy-target" value="videos" class="w-4 h-4">
+                    <span class="text-sm">🎬 Videos Only (Movies + TV)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer p-2 rounded border hover:bg-gray-50">
+                    <input type="radio" name="tidy-target" value="unsorted" class="w-4 h-4">
+                    <span class="text-sm">📁 Unsorted Files Only</span>
+                </label>
+            </div>
+        </div>
+        
         <div class="flex justify-end gap-2">
             <button onclick="closeTidyModal()" class="modal-btn cancel-btn">Cancel</button>
             <button onclick="startTidy()" class="modal-btn confirm-btn">Start Tidy</button>
@@ -735,11 +755,25 @@ function toggleCustomDateInputs() {
 
 // Start Operations
 async function startTidy() {
+    // Get selected target before closing modal
+    const targetRadio = document.querySelector('input[name="tidy-target"]:checked');
+    const target = targetRadio ? targetRadio.value : 'both';
+    
+    const targetLabels = {
+        'both': 'Videos + Unsorted Files',
+        'videos': 'Videos Only',
+        'unsorted': 'Unsorted Files Only'
+    };
+    
     closeTidyModal();
-    showProgressModal('Tidy Database');
+    showProgressModal(`Tidy Database (${targetLabels[target]})`);
     
     try {
-        const response = await fetch('/api/maintenance/tidy', { method: 'POST' });
+        const response = await fetch('/api/maintenance/tidy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target })
+        });
         const data = await response.json();
         
         if (data.success) {
@@ -915,21 +949,43 @@ function buildDetailsHtml(data) {
             ? `<div class="detail-status">🔄 Processing... ${data.current_step || ''}</div>`
             : '';
         
+        // Show target if available
+        const targetLine = data.tidy_target && data.mode_label
+            ? `<div class="detail-row"><span class="detail-label">🎯 Target:</span><span class="detail-value">${data.mode_label}</span></div>`
+            : '';
+        
+        // Build removed breakdown if target is "both"
+        let removedSection = `<div class="detail-row">
+            <span class="detail-label">🗑️ Entries removed:</span>
+            <span class="detail-value ${data.removed > 0 ? 'text-red' : ''}">${data.removed.toLocaleString()}</span>
+        </div>`;
+        
+        if (data.tidy_target === 'both' && data.removed > 0) {
+            removedSection += `
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">├─ 🎬 Videos:</span>
+                    <span class="detail-value">${(data.videos_removed || 0).toLocaleString()}</span>
+                </div>
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">└─ 📁 Unsorted:</span>
+                    <span class="detail-value">${(data.unsorted_removed || 0).toLocaleString()}</span>
+                </div>
+            `;
+        }
+        
         return `
             ${statusLine}
             <div class="detail-section">
+                ${targetLine}
                 <div class="detail-row">
-                    <span class="detail-label">📊 Media items scanned:</span>
+                    <span class="detail-label">📊 Items scanned:</span>
                     <span class="detail-value">${data.processed_items.toLocaleString()} / ${data.total_items.toLocaleString()}</span>
                 </div>
                 <div class="detail-row">
-                    <span class="detail-label">🔍 Telegram entries checked:</span>
+                    <span class="detail-label">🔍 Entries checked:</span>
                     <span class="detail-value">${data.checked.toLocaleString()}</span>
                 </div>
-                <div class="detail-row">
-                    <span class="detail-label">🗑️ Invalid entries removed:</span>
-                    <span class="detail-value ${data.removed > 0 ? 'text-red' : ''}">${data.removed.toLocaleString()}</span>
-                </div>
+                ${removedSection}
                 <div class="detail-row">
                     <span class="detail-label">⏱️ Time:</span>
                     <span class="detail-value">${elapsed}</span>
@@ -937,9 +993,11 @@ function buildDetailsHtml(data) {
             </div>
         `;
     } else if (data.operation_type === 'scan') {
-        const totalAdded = data.movies_added + data.tv_added;
+        const unsortedAdded = data.unsorted_added || 0;
+        const totalAdded = data.movies_added + data.tv_added + unsortedAdded;
         const channelLine = data.channel_name ? `<div class="detail-row"><span class="detail-label">📊 Channel:</span><span class="detail-value">${data.channel_name}</span></div>` : '';
         const modeLine = data.mode_label ? `<div class="detail-row"><span class="detail-label">📅 Mode:</span><span class="detail-value">${data.mode_label}</span></div>` : '';
+        const targetLine = `<div class="detail-row"><span class="detail-label">🎯 Target:</span><span class="detail-value">Videos + Unsorted Files</span></div>`;
         
         const statusLine = data.status === 'running' 
             ? `<div class="detail-status">🔍 Scanning... ${data.processed_items.toLocaleString()} messages checked</div>`
@@ -954,8 +1012,12 @@ function buildDetailsHtml(data) {
                     <span class="detail-value">${data.movies_added}</span>
                 </div>
                 <div class="detail-row detail-indent">
-                    <span class="detail-label">└─ 📺 TV Episodes:</span>
+                    <span class="detail-label">├─ 📺 TV Episodes:</span>
                     <span class="detail-value">${data.tv_added}</span>
+                </div>
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">└─ 📁 Unsorted:</span>
+                    <span class="detail-value">${unsortedAdded}</span>
                 </div>
             `;
         }
@@ -965,6 +1027,7 @@ function buildDetailsHtml(data) {
             <div class="detail-section">
                 ${channelLine}
                 ${modeLine}
+                ${targetLine}
                 <div class="detail-row">
                     <span class="detail-label">📊 Messages checked:</span>
                     <span class="detail-value">${data.checked.toLocaleString()}</span>
@@ -974,12 +1037,22 @@ function buildDetailsHtml(data) {
                     <span class="detail-label">⏭️ Already processed:</span>
                     <span class="detail-value">${data.already_processed.toLocaleString()}</span>
                 </div>
+                ${data.already_processed > 0 ? `
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">├─ 🎬 Videos:</span>
+                    <span class="detail-value">${(data.already_processed_videos || 0).toLocaleString()}</span>
+                </div>
+                <div class="detail-row detail-indent">
+                    <span class="detail-label">└─ 📁 Unsorted:</span>
+                    <span class="detail-value">${(data.already_processed_unsorted || 0).toLocaleString()}</span>
+                </div>
+                ` : ''}
                 <div class="detail-row">
-                    <span class="detail-label">🚫 Skipped (non-video):</span>
-                    <span class="detail-value">${(data.skipped_non_video || 0).toLocaleString()}</span>
+                    <span class="detail-label">🚫 Skipped (no media or file):</span>
+                    <span class="detail-value">${(data.skipped_no_file || 0).toLocaleString()}</span>
                 </div>
                 <div class="detail-row">
-                    <span class="detail-label">⚠️ Failed (metadata):</span>
+                    <span class="detail-label">⚠️ Failed (metadata), moved to unsorted:</span>
                     <span class="detail-value">${(data.failed_metadata || 0).toLocaleString()}</span>
                 </div>
                 <div class="detail-row">
@@ -1094,8 +1167,7 @@ function formatElapsed(seconds) {
 /* 4K Ultra HD - Premium Gold/Black */
 .quality-badge.tier-4k {
     background: linear-gradient(160deg, #0a0a0a 0%, #1a1a1a 30%, #2d2d2d 50%, #1a1a1a 70%, #0a0a0a 100%);
-    border: 1.5px solid;
-    border-image: linear-gradient(135deg, #ffd700 0%, #ffec8b 50%, #ffd700 100%) 1;
+    border: 1.5px solid #ffd700;
     box-shadow: 
         0 2px 10px rgba(255, 215, 0, 0.5),
         inset 0 1px 0 rgba(255, 255, 255, 0.08),
@@ -1115,84 +1187,80 @@ function formatElapsed(seconds) {
     text-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
 }
 
-/* 2K QHD - Blue Steel */
+/* 2K QHD - Gaming Cyan */
 .quality-badge.tier-2k {
-    background: linear-gradient(160deg, #050a14 0%, #0d1a2d 30%, #1a3050 50%, #0d1a2d 70%, #050a14 100%);
-    border: 1.5px solid #4a90d9;
+    background: linear-gradient(135deg, #0891b2 0%, #06b6d4 50%, #22d3ee 100%);
+    border: 1.5px solid rgba(103, 232, 249, 0.5);
     box-shadow: 
-        0 2px 8px rgba(74, 144, 217, 0.35),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        0 0 12px rgba(6, 182, 212, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .quality-badge.tier-2k .res-main {
-    background: linear-gradient(180deg, #a8d4ff 0%, #60a5fa 40%, #3b82f6 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    filter: drop-shadow(0 1px 1px rgba(59, 130, 246, 0.5));
+    color: white;
+    -webkit-text-fill-color: white;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
 }
 
 .quality-badge.tier-2k .res-sub {
-    color: #60a5fa;
-    text-shadow: 0 0 6px rgba(96, 165, 250, 0.4);
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: none;
 }
 
-/* 1080p Full HD - Silver/Platinum */
+/* 1080p Full HD - Gaming Epic Blue */
 .quality-badge.tier-1080p {
-    background: linear-gradient(160deg, #0f0f0f 0%, #252525 30%, #353535 50%, #252525 70%, #0f0f0f 100%);
-    border: 1.5px solid #b0b0b0;
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%);
+    border: 1.5px solid rgba(147, 197, 253, 0.4);
     box-shadow: 
-        0 2px 8px rgba(200, 200, 200, 0.25),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        0 0 12px rgba(59, 130, 246, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .quality-badge.tier-1080p .res-main {
-    background: linear-gradient(180deg, #ffffff 0%, #d0d0d0 40%, #a0a0a0 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.3));
+    color: white;
+    -webkit-text-fill-color: white;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
 }
 
 .quality-badge.tier-1080p .res-sub {
-    color: #c0c0c0;
-    text-shadow: 0 0 4px rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: none;
 }
 
-/* 720p HD - Subtle Gray */
+/* 720p HD - Gaming Rare Green */
 .quality-badge.tier-720p {
-    background: linear-gradient(160deg, #151515 0%, #252525 50%, #151515 100%);
-    border: 1px solid #606060;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    background: linear-gradient(135deg, #16a34a 0%, #22c55e 50%, #4ade80 100%);
+    border: 1px solid rgba(134, 239, 172, 0.4);
+    box-shadow: 
+        0 0 10px rgba(34, 197, 94, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .quality-badge.tier-720p .res-main {
-    background: linear-gradient(180deg, #d0d0d0 0%, #a0a0a0 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: white;
+    -webkit-text-fill-color: white;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
 }
 
 .quality-badge.tier-720p .res-sub {
-    color: #909090;
+    color: rgba(255, 255, 255, 0.9);
 }
 
-/* 480p SD - Muted Brown */
+/* 480p SD - Gaming Common Gray */
 .quality-badge.tier-480p {
-    background: linear-gradient(160deg, #1a1510 0%, #2a2218 50%, #1a1510 100%);
-    border: 1px solid #5a4d3d;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+    background: linear-gradient(135deg, #4b5563 0%, #6b7280 50%, #9ca3af 100%);
+    border: 1px solid rgba(156, 163, 175, 0.3);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
 .quality-badge.tier-480p .res-main {
-    background: linear-gradient(180deg, #c4a882 0%, #9a8060 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: white;
+    -webkit-text-fill-color: white;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
 }
 
 .quality-badge.tier-480p .res-sub {
-    color: #8a7560;
+    color: rgba(255, 255, 255, 0.8);
 }
 
 /* Quality counts below title */
@@ -1221,9 +1289,9 @@ function formatElapsed(seconds) {
 }
 
 .quality-count-item.q-2k {
-    color: #666;
-    background: rgba(128, 128, 128, 0.1);
-    border-color: rgba(128, 128, 128, 0.3);
+    color: #0891b2;
+    background: rgba(6, 182, 212, 0.1);
+    border-color: rgba(6, 182, 212, 0.3);
 }
 
 .quality-count-item.q-1080p {
@@ -1233,15 +1301,15 @@ function formatElapsed(seconds) {
 }
 
 .quality-count-item.q-720p {
-    color: #6b7280;
-    background: rgba(107, 114, 128, 0.1);
-    border-color: rgba(107, 114, 128, 0.2);
+    color: #16a34a;
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.3);
 }
 
 .quality-count-item.q-480p {
-    color: #8b7355;
-    background: rgba(139, 115, 85, 0.1);
-    border-color: rgba(139, 115, 85, 0.2);
+    color: #6b7280;
+    background: rgba(107, 114, 128, 0.1);
+    border-color: rgba(107, 114, 128, 0.2);
 }
 
 /* Hover expansion for quality details */
@@ -1349,8 +1417,8 @@ function formatElapsed(seconds) {
 }
 
 .modal-content {
-    background: var(--card-bg, #1e293b);
-    border: 1px solid var(--border-color, #334155);
+    background: var(--theme-card);
+    border: 1px solid rgba(128, 128, 128, 0.3);
     border-radius: 12px;
     padding: 24px;
     max-width: 400px;
@@ -1371,9 +1439,9 @@ function formatElapsed(seconds) {
     width: 100%;
     padding: 10px 12px;
     border-radius: 8px;
-    border: 1px solid var(--border-color, #334155);
-    background: var(--input-bg, #0f172a);
-    color: var(--text-color, #e2e8f0);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: var(--theme-background);
+    color: var(--theme-text);
     font-size: 14px;
 }
 
@@ -1394,12 +1462,12 @@ function formatElapsed(seconds) {
 
 .cancel-btn {
     background: transparent;
-    border: 1px solid var(--border-color, #334155);
-    color: var(--text-secondary, #94a3b8);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    color: var(--theme-text-secondary);
 }
 
 .cancel-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(128, 128, 128, 0.1);
 }
 
 .confirm-btn {
@@ -1416,9 +1484,9 @@ function formatElapsed(seconds) {
     flex: 1;
     padding: 8px 12px;
     border-radius: 6px;
-    border: 1px solid var(--border-color, #334155);
+    border: 1px solid rgba(128, 128, 128, 0.3);
     background: transparent;
-    color: var(--text-secondary, #94a3b8);
+    color: var(--theme-text-secondary);
     font-size: 13px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -1431,14 +1499,14 @@ function formatElapsed(seconds) {
 }
 
 .mode-btn:hover:not(.active) {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(128, 128, 128, 0.1);
 }
 
 /* Progress Bar */
 .progress-bar-container {
     width: 100%;
     height: 8px;
-    background: var(--input-bg, #0f172a);
+    background: rgba(128, 128, 128, 0.2);
     border-radius: 4px;
     overflow: hidden;
 }
@@ -1452,8 +1520,8 @@ function formatElapsed(seconds) {
 
 /* Progress Details Box */
 .progress-details-box {
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(128, 128, 128, 0.1);
+    border: 1px solid rgba(128, 128, 128, 0.2);
     border-radius: 8px;
     padding: 12px 16px;
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
@@ -1461,10 +1529,10 @@ function formatElapsed(seconds) {
 }
 
 .detail-status {
-    color: var(--text-color, #e2e8f0);
+    color: var(--theme-text);
     padding-bottom: 10px;
     margin-bottom: 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
     font-weight: 500;
 }
 
@@ -1478,7 +1546,7 @@ function formatElapsed(seconds) {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    color: var(--text-secondary, #94a3b8);
+    color: var(--theme-text-secondary);
 }
 
 .detail-row.detail-indent {
@@ -1487,11 +1555,11 @@ function formatElapsed(seconds) {
 }
 
 .detail-label {
-    color: var(--text-secondary, #94a3b8);
+    color: var(--theme-text-secondary);
 }
 
 .detail-value {
-    color: var(--text-color, #e2e8f0);
+    color: var(--theme-text);
     font-weight: 600;
 }
 

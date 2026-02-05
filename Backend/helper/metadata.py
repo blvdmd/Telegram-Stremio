@@ -275,10 +275,31 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
     # -------------------------------------------------------
     # 4. Decide if TMDb required
     # -------------------------------------------------------
+    # Check if IMDb data is incomplete or has placeholder title
+    imdb_has_placeholder_title = (
+        imdb_tv and 
+        imdb_tv.get("title", "").lower().startswith("untitled")
+    )
+    imdb_missing_rating = (
+        imdb_tv and 
+        not imdb_tv.get("rating", {}).get("star")
+    )
+    imdb_missing_genres = (
+        imdb_tv and 
+        not imdb_tv.get("genre")
+    )
+    
+    # Fall back to TMDb if IMDb has placeholder title with missing data
+    imdb_data_incomplete = imdb_has_placeholder_title and (imdb_missing_rating or imdb_missing_genres)
+    
+    if imdb_data_incomplete:
+        LOGGER.info(f"IMDb TV data incomplete for '{title}' (placeholder title: '{imdb_tv.get('title')}', no rating/genres) → falling back to TMDb")
+    
     must_use_tmdb = (
         use_tmdb or
         imdb_tv is None or
-        imdb_tv == {}
+        imdb_tv == {} or
+        imdb_data_incomplete
     )
 
     # =======================================================
@@ -439,10 +460,31 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
     # -------------------------------------------------------
     # 4. DECIDE FINAL DATA SOURCE
     # -------------------------------------------------------
+    # Check if IMDb data is incomplete or has placeholder title
+    imdb_has_placeholder_title = (
+        imdb_details and 
+        imdb_details.get("title", "").lower().startswith("untitled")
+    )
+    imdb_missing_rating = (
+        imdb_details and 
+        not imdb_details.get("rating", {}).get("star")
+    )
+    imdb_missing_genres = (
+        imdb_details and 
+        not imdb_details.get("genre")
+    )
+    
+    # Fall back to TMDb if IMDb has placeholder title with missing data
+    imdb_data_incomplete = imdb_has_placeholder_title and (imdb_missing_rating or imdb_missing_genres)
+    
+    if imdb_data_incomplete:
+        LOGGER.info(f"IMDb data incomplete for '{title}' (placeholder title: '{imdb_details.get('title')}', no rating/genres) → falling back to TMDb")
+    
     must_use_tmdb = (
         use_tmdb or
         imdb_details is None or
-        imdb_details == {}
+        imdb_details == {} or
+        imdb_data_incomplete
     )
 
     # =======================================================

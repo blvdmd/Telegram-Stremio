@@ -14,6 +14,43 @@ from pymongo import DESCENDING
 router = APIRouter(tags=["Custom Media API"])
 
 
+def sanitize_filename(filename: str, max_bytes: int = 250) -> str:
+    """
+    Truncate filename to max_bytes while preserving the file extension.
+    Uses byte length (not character count) for SMB/Samba compatibility
+    since Unicode characters can take multiple bytes.
+    """
+    if not filename:
+        return filename
+    
+    encoded = filename.encode('utf-8')
+    if len(encoded) <= max_bytes:
+        return filename
+    
+    # Extract extension (e.g., .mkv)
+    dot_idx = filename.rfind('.')
+    if dot_idx > 0:
+        ext = filename[dot_idx:]
+        base = filename[:dot_idx]
+        ext_bytes = len(ext.encode('utf-8'))
+    else:
+        ext = ""
+        base = filename
+        ext_bytes = 0
+    
+    # Truncate base to fit within limit
+    target_base_bytes = max_bytes - ext_bytes
+    if target_base_bytes <= 0:
+        # Extension alone exceeds limit, just truncate everything
+        return filename.encode('utf-8')[:max_bytes].decode('utf-8', errors='ignore')
+    
+    base_encoded = base.encode('utf-8')[:target_base_bytes]
+    # Decode safely, ignoring partial UTF-8 sequences at the truncation point
+    truncated_base = base_encoded.decode('utf-8', errors='ignore')
+    
+    return truncated_base + ext
+
+
 def get_base_url(request: Request) -> str:
     """Extract base URL from the incoming request (scheme://host:port)"""
     return f"{request.url.scheme}://{request.url.netloc}"
@@ -27,8 +64,12 @@ def enrich_telegram_object_inplace(telegram_item: dict, base_url: str) -> None:
     telegram_id = telegram_item.get("id", "")
     telegram_item["streaming_url"] = f"{base_url}/dl/{telegram_id}/video.mkv"
     
+    # Sanitize filename for SMB/Samba compatibility (max 250 bytes)
+    if "name" in telegram_item:
+        telegram_item["name"] = sanitize_filename(telegram_item["name"])
+    
     # Set defaults only if not present
-    telegram_item.setdefault("sizeInBytes", None)
+    telegram_item.setdefault("size_bytes", None)
     telegram_item.setdefault("updated_on", None)
     telegram_item.setdefault("created_on", None)
 
@@ -73,6 +114,7 @@ async def stream_movies_json(base_url: str, search: str = "", genre: str = "") -
     """
     Async generator that streams movies as JSON array.
     Memory efficient - processes documents one at a time using cursor batching.
+    Sorted by updated_on descending (newest first) using index.
     """
     filter_dict = build_filter(search, genre)
     
@@ -83,7 +125,8 @@ async def stream_movies_json(base_url: str, search: str = "", genre: str = "") -
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["movie"]
         
-        async for doc in collection.find(filter_dict).batch_size(100):
+        # Sort by updated_on descending (newest first) - uses index for performance
+        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
@@ -99,6 +142,7 @@ async def stream_tv_shows_json(base_url: str, search: str = "", genre: str = "")
     """
     Async generator that streams TV shows as JSON array.
     Memory efficient - processes documents one at a time using cursor batching.
+    Sorted by updated_on descending (newest first) using index.
     """
     filter_dict = build_filter(search, genre)
     
@@ -109,7 +153,8 @@ async def stream_tv_shows_json(base_url: str, search: str = "", genre: str = "")
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["tv"]
         
-        async for doc in collection.find(filter_dict).batch_size(100):
+        # Sort by updated_on descending (newest first) - uses index for performance
+        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
@@ -124,18 +169,19 @@ async def stream_all_media_json(base_url: str, search: str = "", genre: str = ""
     """
     Async generator that streams both movies and TV shows as JSON.
     Memory efficient - processes documents one at a time using cursor batching.
+    Sorted by updated_on descending (newest first) using index.
     """
     filter_dict = build_filter(search, genre)
     
     yield '{"movies":['
     first = True
     
-    # Stream movies
+    # Stream movies - sorted by updated_on descending (newest first)
     for i in range(1, db.current_db_index + 1):
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["movie"]
         
-        async for doc in collection.find(filter_dict).batch_size(100):
+        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
@@ -146,12 +192,12 @@ async def stream_all_media_json(base_url: str, search: str = "", genre: str = ""
     yield '],"tv_shows":['
     first = True
     
-    # Stream TV shows
+    # Stream TV shows - sorted by updated_on descending (newest first)
     for i in range(1, db.current_db_index + 1):
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["tv"]
         
-        async for doc in collection.find(filter_dict).batch_size(100):
+        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False

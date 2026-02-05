@@ -1,10 +1,10 @@
 """
-/scan_files command - Scan authorized channels for unprocessed video messages.
+/scan_files command - Scan authorized channels for unprocessed messages.
 
 This command:
 1. Lets user select channel(s) to scan (if multiple AUTH_CHANNELs)
 2. Lets user choose scan mode: by date range OR by message count
-3. Processes missing files using same logic as receiver
+3. Processes missing files: videos -> movies/TV, non-videos -> unsorted
 4. Shows progress with cancel option and detailed final report
 """
 
@@ -15,11 +15,11 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 from pyrogram.errors import FloodWait
 
-from Backend import db
+from Backend import db, unsorted_collection
 from Backend.config import Telegram
 from Backend.helper.custom_filter import CustomFilters
 from Backend.helper.encrypt import decode_string
-from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls, to_utc_isoformat
 from Backend.helper.metadata import metadata
 from Backend.logger import LOGGER
 
@@ -94,9 +94,15 @@ async def get_channel_title(bot: Client, channel_id: str) -> str:
         return f"Channel {channel_id}"
 
 
-async def build_existing_msg_ids() -> set:
-    """Build set of all message IDs already in database"""
-    existing = set()
+async def build_existing_msg_ids() -> tuple:
+    """
+    Build sets of all message IDs already in database (movies, TV, and unsorted)
+    
+    Returns:
+        Tuple of (all_existing, video_existing, unsorted_existing)
+    """
+    video_existing = set()
+    unsorted_existing = set()
     
     for i in range(1, db.current_db_index + 1):
         db_key = f"storage_{i}"
@@ -106,7 +112,7 @@ async def build_existing_msg_ids() -> set:
             for t in movie.get("telegram", []):
                 try:
                     decoded = await decode_string(t.get("id", ""))
-                    existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
+                    video_existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
                 except Exception:
                     pass
         
@@ -117,22 +123,31 @@ async def build_existing_msg_ids() -> set:
                     for t in episode.get("telegram", []):
                         try:
                             decoded = await decode_string(t.get("id", ""))
-                            existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
+                            video_existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
                         except Exception:
                             pass
+        
+        # Scan unsorted files
+        async for unsorted in unsorted_collection.dbs[db_key][unsorted_collection.COLLECTION_NAME].find({}, {"telegram_id": 1}):
+            try:
+                telegram_id = unsorted.get("telegram_id")
+                if telegram_id:
+                    decoded = await decode_string(telegram_id)
+                    unsorted_existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
+            except Exception:
+                pass
     
-    return existing
+    all_existing = video_existing | unsorted_existing
+    return all_existing, video_existing, unsorted_existing
 
 
-async def process_message(bot: Client, message: Message, stats: dict) -> bool:
+async def process_video_message(bot: Client, message: Message, stats: dict) -> bool:
     """
-    Process a single message, same logic as receiver.py
+    Process a video message, same logic as receiver.py
+    If metadata fails, falls back to unsorted collection.
     Returns True if file was added, False otherwise
     """
     try:
-        if not (message.video or (message.document and message.document.mime_type and message.document.mime_type.startswith("video/"))):
-            return False
-        
         file = message.video or message.document
         title = message.caption or file.file_name
         msg_id = message.id
@@ -141,13 +156,15 @@ async def process_message(bot: Client, message: Message, stats: dict) -> bool:
         
         metadata_info = await metadata(clean_filename(title), int(channel), msg_id)
         if metadata_info is None:
-            LOGGER.warning(f"[ScanFiles] Metadata failed for: {title} (ID: {msg_id})")
+            LOGGER.warning(f"[ScanFiles] Metadata failed for video: {title} (ID: {msg_id})")
             stats["failed_metadata"] += 1
-            return False
+            # Fall back to unsorted collection
+            result = await process_unsorted_message(bot, message, stats, error="Metadata lookup failed")
+            return result
         
         # Store additional telegram metadata
         metadata_info['file_size_bytes'] = file.file_size
-        metadata_info['telegram_date'] = message.date.isoformat() if message.date else None
+        metadata_info['telegram_date'] = to_utc_isoformat(message.date)
         
         title = remove_urls(title)
         if not title.endswith(('.mkv', '.mp4')):
@@ -168,7 +185,31 @@ async def process_message(bot: Client, message: Message, stats: dict) -> bool:
             return False
             
     except Exception as e:
-        LOGGER.error(f"[ScanFiles] Error processing message {message.id}: {e}")
+        LOGGER.error(f"[ScanFiles] Error processing video message {message.id}: {e}")
+        stats["errors"] += 1
+        return False
+
+
+async def process_unsorted_message(bot: Client, message: Message, stats: dict, error: str = None) -> bool:
+    """
+    Process a non-video message and add to unsorted collection.
+    Returns True if file was added, False otherwise.
+    """
+    try:
+        from Backend.pyrofork.plugins.unsorted_receiver import handle_unsorted_file
+        
+        result = await handle_unsorted_file(bot, message, error=error)
+        
+        if result:
+            stats["unsorted_added"] += 1
+            LOGGER.info(f"[ScanFiles] Added to unsorted: message {message.id}")
+            return True
+        else:
+            stats["skipped_unsorted"] += 1
+            return False
+            
+    except Exception as e:
+        LOGGER.error(f"[ScanFiles] Error processing unsorted message {message.id}: {e}")
         stats["errors"] += 1
         return False
 
@@ -435,8 +476,12 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
         "messages_checked": 0,
         "movies_added": 0,
         "tv_added": 0,
+        "unsorted_added": 0,
         "already_processed": 0,
-        "skipped_non_video": 0,
+        "already_processed_videos": 0,
+        "already_processed_unsorted": 0,
+        "skipped_no_file": 0,
+        "skipped_unsorted": 0,
         "failed_metadata": 0,
         "failed_insert": 0,
         "errors": 0
@@ -456,8 +501,8 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
         ])
     )
     
-    existing_msg_ids = await build_existing_msg_ids()
-    LOGGER.info(f"[ScanFiles] Found {len(existing_msg_ids)} existing entries in database")
+    existing_msg_ids, video_msg_ids, unsorted_msg_ids = await build_existing_msg_ids()
+    LOGGER.info(f"[ScanFiles] Found {len(existing_msg_ids)} existing entries (Videos: {len(video_msg_ids)}, Unsorted: {len(unsorted_msg_ids)})")
     
     if SCAN_CANCEL_REQUESTED:
         await status_message.edit_text("❌ Scan cancelled.")
@@ -564,13 +609,25 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
                     stats["messages_checked"] += 1
                     
                     # Classify message FIRST (before checking limit)
-                    if (raw_channel_id, message.id) in existing_msg_ids:
+                    msg_key = (raw_channel_id, message.id)
+                    if msg_key in existing_msg_ids:
                         stats["already_processed"] += 1
+                        # Track breakdown: was it a video or unsorted?
+                        if msg_key in video_msg_ids:
+                            stats["already_processed_videos"] += 1
+                        elif msg_key in unsorted_msg_ids:
+                            stats["already_processed_unsorted"] += 1
                     elif message.video or (message.document and message.document.mime_type and message.document.mime_type.startswith("video/")):
-                        await process_message(client, message, stats)
+                        # Video file -> try movie/TV, fallback to unsorted
+                        await process_video_message(client, message, stats)
+                        await asyncio.sleep(RATE_LIMIT_DELAY)
+                    elif message.document or message.audio or message.voice or message.video_note or message.animation:
+                        # Non-video file -> unsorted collection
+                        await process_unsorted_message(client, message, stats)
                         await asyncio.sleep(RATE_LIMIT_DELAY)
                     else:
-                        stats["skipped_non_video"] += 1
+                        # No file attachment
+                        stats["skipped_no_file"] += 1
                     
                     # Count mode: stop AFTER classifying the message
                     if mode == "count" and limit and stats["messages_checked"] >= limit:
@@ -595,13 +652,15 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
     
     # Final report
     elapsed = time.time() - start_time
-    total_added = stats["movies_added"] + stats["tv_added"]
+    total_videos = stats["movies_added"] + stats["tv_added"]
+    total_added = total_videos + stats["unsorted_added"]
     
     if SCAN_CANCEL_REQUESTED:
         report = (
             f"⚠️ **Scan Cancelled**\n\n"
             f"📊 **Channel{'s' if len(channels_to_scan) > 1 else ''}:** {channels_display}\n"
-            f"📅 **Mode:** {mode_label}\n\n"
+            f"📅 **Mode:** {mode_label}\n"
+            f"🎯 **Target:** Videos + Unsorted Files\n\n"
             f"**Processed before cancel:**\n"
             f"📁 Messages checked: {format_number(stats['messages_checked'])}\n"
             f"📁 New files added: {total_added}\n"
@@ -609,42 +668,56 @@ async def start_scan(client: Client, status_message: Message, user_id: int):
         if total_added > 0:
             report += (
                 f"   ├─ 🎬 Movies: {stats['movies_added']}\n"
-                f"   └─ 📺 TV Episodes: {stats['tv_added']}\n"
+                f"   ├─ 📺 TV Episodes: {stats['tv_added']}\n"
+                f"   └─ 📁 Unsorted: {stats['unsorted_added']}\n"
+            )
+        report += f"\n⏭️ Already processed: {format_number(stats['already_processed'])}\n"
+        if stats['already_processed'] > 0:
+            report += (
+                f"   ├─ 🎬 Videos: {format_number(stats['already_processed_videos'])}\n"
+                f"   └─ 📁 Unsorted: {format_number(stats['already_processed_unsorted'])}\n"
             )
         report += (
-            f"\n⏭️ Already processed: {format_number(stats['already_processed'])}\n"
-            f"🚫 Skipped (non-video): {format_number(stats['skipped_non_video'])}\n"
-            f"⚠️ Failed (metadata): {format_number(stats['failed_metadata'])}"
+            f"🚫 Skipped (no media or file): {format_number(stats['skipped_no_file'])}\n"
+            f"⚠️ Failed (metadata), moved to unsorted: {format_number(stats['failed_metadata'])}"
         )
     else:
         if stats["messages_checked"] == 0:
             report = (
                 f"✅ **Scan Complete!**\n\n"
                 f"📊 **Channel{'s' if len(channels_to_scan) > 1 else ''}:** {channels_display}\n"
-                f"📅 **Mode:** {mode_label}\n\n"
+                f"📅 **Mode:** {mode_label}\n"
+                f"🎯 **Target:** Videos + Unsorted Files\n\n"
                 f"⚠️ No messages found in this range."
             )
         else:
             report = (
                 f"✅ **Scan Complete!**\n\n"
                 f"📊 **Channel{'s' if len(channels_to_scan) > 1 else ''}:**\n   • {channels_display}\n"
-                f"📅 **Mode:** {mode_label} ({format_number(stats['messages_checked'])} messages found)\n\n"
+                f"📅 **Mode:** {mode_label} ({format_number(stats['messages_checked'])} messages found)\n"
+                f"🎯 **Target:** Videos + Unsorted Files\n\n"
                 f"📁 **New files added:** {total_added}\n"
             )
             if total_added > 0:
                 report += (
                     f"   ├─ 🎬 Movies: {stats['movies_added']}\n"
-                    f"   └─ 📺 TV Episodes: {stats['tv_added']}\n"
+                    f"   ├─ 📺 TV Episodes: {stats['tv_added']}\n"
+                    f"   └─ 📁 Unsorted: {stats['unsorted_added']}\n"
+                )
+            report += f"\n⏭️ Already processed: {format_number(stats['already_processed'])}\n"
+            if stats['already_processed'] > 0:
+                report += (
+                    f"   ├─ 🎬 Videos: {format_number(stats['already_processed_videos'])}\n"
+                    f"   └─ 📁 Unsorted: {format_number(stats['already_processed_unsorted'])}\n"
                 )
             report += (
-                f"\n⏭️ Already processed: {format_number(stats['already_processed'])}\n"
-                f"🚫 Skipped (non-video): {format_number(stats['skipped_non_video'])}\n"
-                f"⚠️ Failed (metadata): {format_number(stats['failed_metadata'])}\n"
+                f"🚫 Skipped (no media or file): {format_number(stats['skipped_no_file'])}\n"
+                f"⚠️ Failed (metadata), moved to unsorted: {format_number(stats['failed_metadata'])}\n"
                 f"⏱️ Time taken: {format_eta(elapsed)}"
             )
             
             if total_added == 0 and stats["already_processed"] > 0:
-                report += "\n\nℹ️ All video files in this range are already in the database."
+                report += "\n\nℹ️ All files in this range are already in the database."
     
     await status_message.edit_text(report)
     

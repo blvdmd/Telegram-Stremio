@@ -132,9 +132,16 @@
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div class="flex-1">
                         <div class="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
-                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-bold bg-blue-100 text-blue-800">
-                                {{ quality.quality }}
-                            </span>
+                            {% set q = quality.quality|lower %}
+                            {% if '4k' in q or '2160' in q %}
+                            <span class="quality-badge quality-4k">★ {{ quality.quality }}</span>
+                            {% elif '1080' in q %}
+                            <span class="quality-badge quality-1080p">{{ quality.quality }}</span>
+                            {% elif '720' in q %}
+                            <span class="quality-badge quality-720p">{{ quality.quality }}</span>
+                            {% else %}
+                            <span class="quality-badge quality-sd">{{ quality.quality }}</span>
+                            {% endif %}
                             <span class="text-sm font-medium text-gray-600">{{ quality.size }}</span>
                         </div>
                         <p class="text-sm text-gray-500 break-all mb-2">{{ quality.name }}</p>
@@ -209,9 +216,16 @@
                                         <div class="flex flex-col bg-white border border-gray-200 rounded-md p-3">
                                             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                                                 <div class="flex flex-wrap items-center gap-2">
-                                                    <span class="inline-flex items-center px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-800">
-                                                        {{ quality.quality }}
-                                                    </span>
+                                                    {% set q = quality.quality|lower %}
+                                                    {% if '4k' in q or '2160' in q %}
+                                                    <span class="quality-badge quality-badge-sm quality-4k">★ {{ quality.quality }}</span>
+                                                    {% elif '1080' in q %}
+                                                    <span class="quality-badge quality-badge-sm quality-1080p">{{ quality.quality }}</span>
+                                                    {% elif '720' in q %}
+                                                    <span class="quality-badge quality-badge-sm quality-720p">{{ quality.quality }}</span>
+                                                    {% else %}
+                                                    <span class="quality-badge quality-badge-sm quality-sd">{{ quality.quality }}</span>
+                                                    {% endif %}
                                                     <span class="text-xs text-gray-500">{{ quality.size }}</span>
                                                 </div>
                                                 <a href="{{ base_url }}/dl/{{ quality.id }}/video.mkv" 
@@ -353,6 +367,52 @@ document.addEventListener('DOMContentLoaded', function() {
 .break-all {
     word-break: break-all;
     overflow-wrap: break-word;
+}
+
+/* Quality Badge Base Styles - 40% larger font */
+.quality-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.375rem 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.025em;
+}
+
+/* 4K / 2160p - Legendary Purple */
+.quality-4k {
+    background: linear-gradient(135deg, #9333ea 0%, #7c3aed 50%, #8b5cf6 100%);
+    color: white;
+    box-shadow: 0 0 16px rgba(147, 51, 234, 0.5), inset 0 1px 0 rgba(255,255,255,0.2);
+    outline: 2px solid rgba(196, 181, 253, 0.6);
+    outline-offset: 0;
+}
+
+/* 1080p - Epic Blue */
+.quality-1080p {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%);
+    color: white;
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+/* 720p - Rare Green */
+.quality-720p {
+    background: linear-gradient(135deg, #16a34a 0%, #22c55e 50%, #4ade80 100%);
+    color: white;
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.35), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+/* 480p and below - Common Gray */
+.quality-sd {
+    background: linear-gradient(135deg, #4b5563 0%, #6b7280 50%, #9ca3af 100%);
+    color: white;
+}
+
+/* TV Episode smaller variant */
+.quality-badge-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
 }
 </style>
 {% endblock %}

@@ -7,14 +7,14 @@ import time
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Set, Tuple, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pyrogram.errors import FloodWait
 
-from Backend import db
+from Backend import db, unsorted_collection
 from Backend.config import Telegram
 from Backend.helper.encrypt import decode_string
-from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls, to_utc_isoformat
 from Backend.helper.metadata import metadata
 from Backend.helper.task_manager import delete_message
 from Backend.logger import LOGGER
@@ -33,10 +33,15 @@ class OperationProgress:
     processed_items: int = 0
     checked: int = 0
     removed: int = 0
+    videos_removed: int = 0
+    unsorted_removed: int = 0
     movies_added: int = 0
     tv_added: int = 0
+    unsorted_added: int = 0
     already_processed: int = 0
-    skipped_non_video: int = 0
+    already_processed_videos: int = 0
+    already_processed_unsorted: int = 0
+    skipped_no_file: int = 0
     failed_metadata: int = 0
     errors: int = 0
     start_time: float = 0
@@ -44,6 +49,7 @@ class OperationProgress:
     error_message: str = ""
     channel_name: str = ""
     mode_label: str = ""
+    tidy_target: str = "both"  # "both", "videos", "unsorted"
     
     def to_dict(self) -> dict:
         elapsed = (self.end_time or time.time()) - self.start_time if self.start_time else 0
@@ -55,15 +61,21 @@ class OperationProgress:
             "processed_items": self.processed_items,
             "checked": self.checked,
             "removed": self.removed,
+            "videos_removed": self.videos_removed,
+            "unsorted_removed": self.unsorted_removed,
             "movies_added": self.movies_added,
             "tv_added": self.tv_added,
+            "unsorted_added": self.unsorted_added,
             "already_processed": self.already_processed,
-            "skipped_non_video": self.skipped_non_video,
+            "already_processed_videos": self.already_processed_videos,
+            "already_processed_unsorted": self.already_processed_unsorted,
+            "skipped_no_file": self.skipped_no_file,
             "failed_metadata": self.failed_metadata,
             "errors": self.errors,
             "elapsed_seconds": elapsed,
             "channel_name": self.channel_name,
             "mode_label": self.mode_label,
+            "tidy_target": self.tidy_target,
             "error_message": self.error_message,
         }
 
@@ -247,10 +259,63 @@ async def tidy_tv_show(bot, collection, tv_show: dict, progress: OperationProgre
     return stats
 
 
-async def run_tidy(bot) -> OperationProgress:
+async def is_unsorted_message_valid(bot, telegram_id: str) -> Tuple[bool, int, int]:
+    """
+    Check if a telegram message for unsorted file still exists.
+    Returns: (is_valid, chat_id, msg_id)
+    """
+    try:
+        decoded = await decode_string(telegram_id)
+        chat_id = int(f"-100{decoded['chat_id']}")
+        msg_id = int(decoded['msg_id'])
+        
+        message = await bot.get_messages(chat_id, msg_id)
+        
+        # For unsorted, accept any file attachment (not just video)
+        if message and (message.document or message.video or message.audio or 
+                       message.voice or message.video_note or message.animation):
+            return (True, chat_id, msg_id)
+        else:
+            return (False, chat_id, msg_id)
+            
+    except Exception as e:
+        LOGGER.debug(f"[Tidy][Unsorted] Error checking message: {e}")
+        return (False, 0, 0)
+
+
+async def tidy_unsorted_file(bot, collection, file_doc: dict, progress: OperationProgress) -> dict:
+    """Check and clean up an unsorted file entry."""
+    stats = {"checked": 1, "removed": 0}
+    
+    telegram_id = file_doc.get("telegram_id")
+    if not telegram_id:
+        await collection.delete_one({"_id": file_doc["_id"]})
+        stats["removed"] = 1
+        return stats
+    
+    is_valid, chat_id, msg_id = await is_unsorted_message_valid(bot, telegram_id)
+    
+    if not is_valid:
+        await collection.delete_one({"_id": file_doc["_id"]})
+        stats["removed"] = 1
+        LOGGER.info(f"[Tidy][Unsorted] Removed: {file_doc.get('file_name')}")
+        
+        if chat_id and msg_id:
+            _track_delete_task(chat_id, msg_id)
+    
+    return stats
+
+
+async def run_tidy(bot, target: str = "both") -> OperationProgress:
     """
     Run the tidy operation using the provided bot client.
-    Returns progress object with results.
+    
+    Args:
+        bot: Pyrogram Client instance
+        target: "both", "videos", or "unsorted"
+        
+    Returns:
+        progress object with results
     """
     global _current_operation, _cancel_requested, _pending_delete_tasks
     
@@ -264,17 +329,30 @@ async def run_tidy(bot) -> OperationProgress:
         _current_operation.status = "running"
         _current_operation.start_time = time.time()
         _current_operation.current_step = "Counting items..."
+        _current_operation.tidy_target = target
+    
+    target_labels = {
+        "both": "Videos + Unsorted Files",
+        "videos": "Videos Only",
+        "unsorted": "Unsorted Files Only"
+    }
+    _current_operation.mode_label = target_labels.get(target, target)
     
     try:
-        # Count totals
+        # Count totals based on target
         total_movies = 0
         total_tv = 0
+        total_unsorted = 0
+        
         for i in range(1, db.current_db_index + 1):
             key = f"storage_{i}"
-            total_movies += await db.dbs[key]["movie"].count_documents({})
-            total_tv += await db.dbs[key]["tv"].count_documents({})
+            if target in ("both", "videos"):
+                total_movies += await db.dbs[key]["movie"].count_documents({})
+                total_tv += await db.dbs[key]["tv"].count_documents({})
+            if target in ("both", "unsorted"):
+                total_unsorted += await unsorted_collection.dbs[key][unsorted_collection.COLLECTION_NAME].count_documents({})
         
-        _current_operation.total_items = total_movies + total_tv
+        _current_operation.total_items = total_movies + total_tv + total_unsorted
         _current_operation.current_step = "Processing..."
         
         # Match bot command's concurrency settings
@@ -285,87 +363,130 @@ async def run_tidy(bot) -> OperationProgress:
         # Shared counters for concurrent tasks
         checked_count = 0
         removed_count = 0
+        videos_removed = 0
+        unsorted_removed = 0
         processed_count = 0
         
         async def process_movie_concurrent(collection, movie):
-            nonlocal checked_count, removed_count, processed_count
+            nonlocal checked_count, removed_count, videos_removed, processed_count
             if _cancel_requested:
                 return
             async with semaphore:
                 stats = await tidy_movie(bot, collection, movie, _current_operation)
                 checked_count += stats["checked"]
                 removed_count += stats["removed"]
+                videos_removed += stats["removed"]
                 processed_count += 1
                 await asyncio.sleep(RATE_LIMIT_DELAY)
         
         async def process_tv_concurrent(collection, tv_show):
-            nonlocal checked_count, removed_count, processed_count
+            nonlocal checked_count, removed_count, videos_removed, processed_count
             if _cancel_requested:
                 return
             async with semaphore:
                 stats = await tidy_tv_show(bot, collection, tv_show, _current_operation)
                 checked_count += stats["checked"]
                 removed_count += stats["removed"]
+                videos_removed += stats["removed"]
                 processed_count += 1
                 await asyncio.sleep(RATE_LIMIT_DELAY)
         
-        # Process movies with concurrency
-        for i in range(1, db.current_db_index + 1):
+        async def process_unsorted_concurrent(collection, file_doc):
+            nonlocal checked_count, removed_count, unsorted_removed, processed_count
             if _cancel_requested:
-                break
-                
-            key = f"storage_{i}"
-            collection = db.dbs[key]["movie"]
-            
-            tasks = []
-            async for movie in collection.find({}):
-                if _cancel_requested:
-                    break
-                tasks.append(process_movie_concurrent(collection, movie))
-                
-                # Process in batches (same as bot command)
-                if len(tasks) >= CONCURRENCY * 2:
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    # Update progress after batch
-                    _current_operation.checked = checked_count
-                    _current_operation.removed = removed_count
-                    _current_operation.processed_items = processed_count
-                    tasks = []
-            
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-                _current_operation.checked = checked_count
-                _current_operation.removed = removed_count
-                _current_operation.processed_items = processed_count
+                return
+            async with semaphore:
+                stats = await tidy_unsorted_file(bot, collection, file_doc, _current_operation)
+                checked_count += stats["checked"]
+                removed_count += stats["removed"]
+                unsorted_removed += stats["removed"]
+                processed_count += 1
+                await asyncio.sleep(RATE_LIMIT_DELAY)
         
-        # Process TV shows with concurrency
+        # Process databases
         for i in range(1, db.current_db_index + 1):
             if _cancel_requested:
                 break
                 
             key = f"storage_{i}"
-            collection = db.dbs[key]["tv"]
             
-            tasks = []
-            async for tv_show in collection.find({}):
-                if _cancel_requested:
-                    break
-                tasks.append(process_tv_concurrent(collection, tv_show))
+            # Process videos (movies + TV)
+            if target in ("both", "videos"):
+                # Movies
+                collection = db.dbs[key]["movie"]
+                tasks = []
+                async for movie in collection.find({}):
+                    if _cancel_requested:
+                        break
+                    tasks.append(process_movie_concurrent(collection, movie))
+                    
+                    if len(tasks) >= CONCURRENCY * 2:
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        _current_operation.checked = checked_count
+                        _current_operation.removed = removed_count
+                        _current_operation.videos_removed = videos_removed
+                        _current_operation.unsorted_removed = unsorted_removed
+                        _current_operation.processed_items = processed_count
+                        tasks = []
                 
-                # Process in batches (same as bot command)
-                if len(tasks) >= CONCURRENCY * 2:
+                if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
-                    # Update progress after batch
                     _current_operation.checked = checked_count
                     _current_operation.removed = removed_count
+                    _current_operation.videos_removed = videos_removed
+                    _current_operation.unsorted_removed = unsorted_removed
                     _current_operation.processed_items = processed_count
-                    tasks = []
+                
+                # TV Shows
+                collection = db.dbs[key]["tv"]
+                tasks = []
+                async for tv_show in collection.find({}):
+                    if _cancel_requested:
+                        break
+                    tasks.append(process_tv_concurrent(collection, tv_show))
+                    
+                    if len(tasks) >= CONCURRENCY * 2:
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        _current_operation.checked = checked_count
+                        _current_operation.removed = removed_count
+                        _current_operation.videos_removed = videos_removed
+                        _current_operation.unsorted_removed = unsorted_removed
+                        _current_operation.processed_items = processed_count
+                        tasks = []
+                
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    _current_operation.checked = checked_count
+                    _current_operation.removed = removed_count
+                    _current_operation.videos_removed = videos_removed
+                    _current_operation.unsorted_removed = unsorted_removed
+                    _current_operation.processed_items = processed_count
             
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-                _current_operation.checked = checked_count
-                _current_operation.removed = removed_count
-                _current_operation.processed_items = processed_count
+            # Process unsorted files
+            if target in ("both", "unsorted"):
+                collection = unsorted_collection.dbs[key][unsorted_collection.COLLECTION_NAME]
+                tasks = []
+                async for file_doc in collection.find({}):
+                    if _cancel_requested:
+                        break
+                    tasks.append(process_unsorted_concurrent(collection, file_doc))
+                    
+                    if len(tasks) >= CONCURRENCY * 2:
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        _current_operation.checked = checked_count
+                        _current_operation.removed = removed_count
+                        _current_operation.videos_removed = videos_removed
+                        _current_operation.unsorted_removed = unsorted_removed
+                        _current_operation.processed_items = processed_count
+                        tasks = []
+                
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    _current_operation.checked = checked_count
+                    _current_operation.removed = removed_count
+                    _current_operation.videos_removed = videos_removed
+                    _current_operation.unsorted_removed = unsorted_removed
+                    _current_operation.processed_items = processed_count
         
         # Wait for any pending delete tasks to complete
         if _pending_delete_tasks:
@@ -413,9 +534,15 @@ def get_raw_channel_id(channel_id) -> str:
     return channel_str.lstrip("-")
 
 
-async def build_existing_msg_ids() -> Set[Tuple[str, int]]:
-    """Build a set of (channel_id, msg_id) for all existing entries."""
-    existing = set()
+async def build_existing_msg_ids() -> Tuple[Set[Tuple[str, int]], Set[Tuple[str, int]], Set[Tuple[str, int]]]:
+    """
+    Build sets of (channel_id, msg_id) for all existing entries.
+    
+    Returns:
+        Tuple of (all_existing, video_existing, unsorted_existing)
+    """
+    video_existing = set()
+    unsorted_existing = set()
     
     for i in range(1, db.current_db_index + 1):
         db_key = f"storage_{i}"
@@ -424,7 +551,7 @@ async def build_existing_msg_ids() -> Set[Tuple[str, int]]:
             for t in movie.get("telegram", []):
                 try:
                     decoded = await decode_string(t.get("id", ""))
-                    existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
+                    video_existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
                 except Exception:
                     pass
         
@@ -434,52 +561,100 @@ async def build_existing_msg_ids() -> Set[Tuple[str, int]]:
                     for t in episode.get("telegram", []):
                         try:
                             decoded = await decode_string(t.get("id", ""))
-                            existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
+                            video_existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
                         except Exception:
                             pass
+        
+        # Include unsorted files
+        async for unsorted in unsorted_collection.dbs[db_key][unsorted_collection.COLLECTION_NAME].find({}, {"telegram_id": 1}):
+            try:
+                telegram_id = unsorted.get("telegram_id")
+                if telegram_id:
+                    decoded = await decode_string(telegram_id)
+                    unsorted_existing.add((str(decoded.get("chat_id")), int(decoded.get("msg_id"))))
+            except Exception:
+                pass
     
-    return existing
+    all_existing = video_existing | unsorted_existing
+    return all_existing, video_existing, unsorted_existing
+
+
+async def process_unsorted_scan_message(bot, message, stats: dict, progress: OperationProgress, error: str = None) -> bool:
+    """Process a non-video message and add to unsorted collection."""
+    try:
+        from Backend.pyrofork.plugins.unsorted_receiver import handle_unsorted_file
+        
+        result = await handle_unsorted_file(bot, message, error=error)
+        
+        if result:
+            stats["unsorted_added"] += 1
+            progress.unsorted_added += 1
+            LOGGER.info(f"[Scan] Added to unsorted: message {message.id}")
+            return True
+        else:
+            stats["skipped_unsorted"] += 1
+            return False
+            
+    except Exception as e:
+        LOGGER.error(f"[Scan] Error processing unsorted message {message.id}: {e}")
+        stats["errors"] += 1
+        progress.errors += 1
+        return False
 
 
 async def process_scan_message(bot, message, stats: dict, progress: OperationProgress) -> bool:
-    """Process a single message for scan operation."""
+    """
+    Process a single message for scan operation.
+    Videos go to movies/TV, non-videos go to unsorted.
+    """
     try:
-        if not (message.video or (message.document and message.document.mime_type and 
-                message.document.mime_type.startswith("video/"))):
-            return False
+        # Check if it's a video
+        is_video = message.video or (message.document and message.document.mime_type and 
+                message.document.mime_type.startswith("video/"))
         
-        file = message.video or message.document
-        title = message.caption or file.file_name
-        msg_id = message.id
-        size = get_readable_file_size(file.file_size)
-        channel = str(message.chat.id).replace("-100", "")
-        
-        metadata_info = await metadata(clean_filename(title), int(channel), msg_id)
-        if metadata_info is None:
-            LOGGER.warning(f"[Scan] Metadata failed for: {title}")
-            stats["failed_metadata"] += 1
-            return False
-        
-        metadata_info['file_size_bytes'] = file.file_size
-        metadata_info['telegram_date'] = message.date.isoformat() if message.date else None
-        
-        title = remove_urls(title)
-        if not title.endswith(('.mkv', '.mp4')):
-            title += '.mkv'
-        
-        updated_id = await db.insert_media(metadata_info, channel=int(channel), msg_id=msg_id, size=size, name=title)
-        
-        if updated_id:
-            if metadata_info.get('media_type') == 'movie':
-                stats["movies_added"] += 1
-                progress.movies_added += 1
+        if is_video:
+            # Process as video (movie/TV)
+            file = message.video or message.document
+            title = message.caption or file.file_name
+            msg_id = message.id
+            size = get_readable_file_size(file.file_size)
+            channel = str(message.chat.id).replace("-100", "")
+            
+            metadata_info = await metadata(clean_filename(title), int(channel), msg_id)
+            if metadata_info is None:
+                LOGGER.warning(f"[Scan] Metadata failed for video: {title}")
+                stats["failed_metadata"] += 1
+                # Fall back to unsorted
+                return await process_unsorted_scan_message(bot, message, stats, progress, error="Metadata lookup failed")
+            
+            metadata_info['file_size_bytes'] = file.file_size
+            metadata_info['telegram_date'] = to_utc_isoformat(message.date)
+            
+            title = remove_urls(title)
+            if not title.endswith(('.mkv', '.mp4')):
+                title += '.mkv'
+            
+            updated_id = await db.insert_media(metadata_info, channel=int(channel), msg_id=msg_id, size=size, name=title)
+            
+            if updated_id:
+                if metadata_info.get('media_type') == 'movie':
+                    stats["movies_added"] += 1
+                    progress.movies_added += 1
+                else:
+                    stats["tv_added"] += 1
+                    progress.tv_added += 1
+                LOGGER.info(f"[Scan] Added: {metadata_info.get('title')}")
+                return True
             else:
-                stats["tv_added"] += 1
-                progress.tv_added += 1
-            LOGGER.info(f"[Scan] Added: {metadata_info.get('title')}")
-            return True
+                stats["failed_insert"] += 1
+                return False
+        
+        # Non-video file - add to unsorted
+        elif message.document or message.audio or message.voice or message.video_note or message.animation:
+            return await process_unsorted_scan_message(bot, message, stats, progress)
+        
         else:
-            stats["failed_insert"] += 1
+            # No file attachment
             return False
             
     except Exception as e:
@@ -550,8 +725,12 @@ async def run_scan(
         "messages_checked": 0,
         "movies_added": 0,
         "tv_added": 0,
+        "unsorted_added": 0,
         "already_processed": 0,
-        "skipped_non_video": 0,
+        "already_processed_videos": 0,
+        "already_processed_unsorted": 0,
+        "skipped_no_file": 0,
+        "skipped_unsorted": 0,
         "failed_metadata": 0,
         "failed_insert": 0,
         "errors": 0
@@ -566,9 +745,9 @@ async def run_scan(
     PROGRESS_UPDATE_INTERVAL = 10  # Update progress every N messages for responsive UI
     
     try:
-        # Build existing message IDs
-        existing_msg_ids = await build_existing_msg_ids()
-        LOGGER.info(f"[Scan] Found {len(existing_msg_ids)} existing entries")
+        # Build existing message IDs (returns all, videos, unsorted sets)
+        existing_msg_ids, video_msg_ids, unsorted_msg_ids = await build_existing_msg_ids()
+        LOGGER.info(f"[Scan] Found {len(existing_msg_ids)} existing entries (Videos: {len(video_msg_ids)}, Unsorted: {len(unsorted_msg_ids)})")
         
         if _cancel_requested:
             _current_operation.status = "cancelled"
@@ -661,15 +840,27 @@ async def run_scan(
                     # Count messages that pass filters
                     stats["messages_checked"] += 1
                     
-                    # Classify message FIRST (before checking limit)
-                    if (raw_channel_id, message.id) in existing_msg_ids:
+                    # Classify message and process appropriately
+                    msg_key = (raw_channel_id, message.id)
+                    if msg_key in existing_msg_ids:
                         stats["already_processed"] += 1
+                        # Track breakdown: was it a video or unsorted?
+                        if msg_key in video_msg_ids:
+                            stats["already_processed_videos"] += 1
+                        elif msg_key in unsorted_msg_ids:
+                            stats["already_processed_unsorted"] += 1
                     elif message.video or (message.document and message.document.mime_type and 
                             message.document.mime_type.startswith("video/")):
+                        # Video file -> try movie/TV, fallback to unsorted
+                        await process_scan_message(bot, message, stats, _current_operation)
+                        await asyncio.sleep(RATE_LIMIT_DELAY)
+                    elif message.document or message.audio or message.voice or message.video_note or message.animation:
+                        # Non-video file -> unsorted collection
                         await process_scan_message(bot, message, stats, _current_operation)
                         await asyncio.sleep(RATE_LIMIT_DELAY)
                     else:
-                        stats["skipped_non_video"] += 1
+                        # No file attachment (text only, stickers, etc.)
+                        stats["skipped_no_file"] += 1
                     
                     # Count mode: stop AFTER classifying the message
                     if mode == "count" and limit and stats["messages_checked"] >= limit:
@@ -681,14 +872,20 @@ async def run_scan(
                         _current_operation.processed_items = messages_scanned
                         _current_operation.checked = stats["messages_checked"]
                         _current_operation.already_processed = stats["already_processed"]
-                        _current_operation.skipped_non_video = stats["skipped_non_video"]
+                        _current_operation.already_processed_videos = stats["already_processed_videos"]
+                        _current_operation.already_processed_unsorted = stats["already_processed_unsorted"]
+                        _current_operation.skipped_no_file = stats["skipped_no_file"]
+                        _current_operation.unsorted_added = stats["unsorted_added"]
                         _current_operation.failed_metadata = stats["failed_metadata"]
                 
                 # Update progress at end of each batch
                 _current_operation.processed_items = messages_scanned
                 _current_operation.checked = stats["messages_checked"]
                 _current_operation.already_processed = stats["already_processed"]
-                _current_operation.skipped_non_video = stats["skipped_non_video"]
+                _current_operation.already_processed_videos = stats["already_processed_videos"]
+                _current_operation.already_processed_unsorted = stats["already_processed_unsorted"]
+                _current_operation.skipped_no_file = stats["skipped_no_file"]
+                _current_operation.unsorted_added = stats["unsorted_added"]
                 _current_operation.failed_metadata = stats["failed_metadata"]
                 
                 current_id = batch_start - 1
@@ -698,10 +895,13 @@ async def run_scan(
         _current_operation.processed_items = messages_scanned
         _current_operation.checked = stats["messages_checked"]
         _current_operation.already_processed = stats["already_processed"]
-        _current_operation.skipped_non_video = stats["skipped_non_video"]
+        _current_operation.already_processed_videos = stats["already_processed_videos"]
+        _current_operation.already_processed_unsorted = stats["already_processed_unsorted"]
+        _current_operation.skipped_no_file = stats["skipped_no_file"]
         _current_operation.failed_metadata = stats["failed_metadata"]
         _current_operation.movies_added = stats["movies_added"]
         _current_operation.tv_added = stats["tv_added"]
+        _current_operation.unsorted_added = stats["unsorted_added"]
         _current_operation.errors = stats["errors"]
         
         _current_operation.end_time = time.time()
@@ -727,10 +927,16 @@ def get_auth_channels() -> list:
     return []
 
 
-def reset_operation():
-    """Reset operation state"""
+async def reset_operation():
+    """Reset operation state (async to properly acquire lock)"""
     global _current_operation, _cancel_requested, _pending_delete_tasks
-    _current_operation = None
-    _cancel_requested = False
-    _pending_delete_tasks = []
+    
+    async with _operation_lock:
+        # Wait for any pending delete tasks to complete
+        if _pending_delete_tasks:
+            await asyncio.gather(*_pending_delete_tasks, return_exceptions=True)
+        
+        _current_operation = None
+        _cancel_requested = False
+        _pending_delete_tasks = []
 
