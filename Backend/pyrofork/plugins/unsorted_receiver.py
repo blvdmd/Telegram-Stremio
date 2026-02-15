@@ -22,7 +22,8 @@ from Backend.helper.unsorted_modal import (
     get_file_extension,
     get_extension_from_mime,
     detect_quality,
-    format_duration
+    format_duration,
+    extract_best_filename
 )
 
 
@@ -82,6 +83,9 @@ async def handle_unsorted_file(
             if inferred_ext:
                 file_name = f"{file_name}.{inferred_ext}"
                 extension = inferred_ext
+        
+        # Extract best filename from caption (done once at ingestion, saved to DB)
+        file_name = extract_best_filename(file_name, message.caption, extension)
         
         # Determine media type from MIME and extension
         media_type = get_media_type(mime_type, extension)

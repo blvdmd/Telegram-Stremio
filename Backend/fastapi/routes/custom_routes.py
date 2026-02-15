@@ -4,14 +4,21 @@ These routes are isolated from upstream changes to minimize merge conflicts.
 """
 
 import orjson
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, Path
 from fastapi.responses import JSONResponse, StreamingResponse
 from Backend import db
 from Backend.helper.database import convert_objectid_to_str
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from pymongo import DESCENDING
 
 router = APIRouter(tags=["Custom Media API"])
+
+# MongoDB projection for compact mode - only metadata fields, no heavy file/season data
+COMPACT_PROJECTION = {
+    "_id": 1, "tmdb_id": 1, "imdb_id": 1, "db_index": 1,
+    "title": 1, "description": 1, "rating": 1, "release_year": 1,
+    "runtime": 1, "media_type": 1, "updated_on": 1
+}
 
 
 def sanitize_filename(filename: str, max_bytes: int = 250) -> str:
@@ -110,13 +117,15 @@ def build_filter(search: str = "", genre: str = "") -> dict:
     return filter_dict
 
 
-async def stream_movies_json(base_url: str, search: str = "", genre: str = "") -> AsyncGenerator[str, None]:
+async def stream_movies_json(base_url: str, search: str = "", genre: str = "", compact: bool = False) -> AsyncGenerator[str, None]:
     """
     Async generator that streams movies as JSON array.
     Memory efficient - processes documents one at a time using cursor batching.
     Sorted by updated_on descending (newest first) using index.
+    When compact=True, uses projection to skip heavy fields (telegram, poster, etc.)
     """
     filter_dict = build_filter(search, genre)
+    projection = COMPACT_PROJECTION if compact else None
     
     yield '{"movies":['
     first = True
@@ -126,25 +135,28 @@ async def stream_movies_json(base_url: str, search: str = "", genre: str = "") -
         collection = db.dbs[db_key]["movie"]
         
         # Sort by updated_on descending (newest first) - uses index for performance
-        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
+        async for doc in collection.find(filter_dict, projection).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
             # Convert ObjectId and enrich in place - no deep copies
             converted = convert_objectid_to_str(doc)
-            enrich_movie_inplace(converted, base_url)
+            if not compact:
+                enrich_movie_inplace(converted, base_url)
             yield orjson.dumps(converted).decode()
     
     yield ']}'
 
 
-async def stream_tv_shows_json(base_url: str, search: str = "", genre: str = "") -> AsyncGenerator[str, None]:
+async def stream_tv_shows_json(base_url: str, search: str = "", genre: str = "", compact: bool = False) -> AsyncGenerator[str, None]:
     """
     Async generator that streams TV shows as JSON array.
     Memory efficient - processes documents one at a time using cursor batching.
     Sorted by updated_on descending (newest first) using index.
+    When compact=True, uses projection to skip heavy fields (seasons, poster, etc.)
     """
     filter_dict = build_filter(search, genre)
+    projection = COMPACT_PROJECTION if compact else None
     
     yield '{"tv_shows":['
     first = True
@@ -154,24 +166,27 @@ async def stream_tv_shows_json(base_url: str, search: str = "", genre: str = "")
         collection = db.dbs[db_key]["tv"]
         
         # Sort by updated_on descending (newest first) - uses index for performance
-        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
+        async for doc in collection.find(filter_dict, projection).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
             converted = convert_objectid_to_str(doc)
-            enrich_tv_show_inplace(converted, base_url)
+            if not compact:
+                enrich_tv_show_inplace(converted, base_url)
             yield orjson.dumps(converted).decode()
     
     yield ']}'
 
 
-async def stream_all_media_json(base_url: str, search: str = "", genre: str = "") -> AsyncGenerator[str, None]:
+async def stream_all_media_json(base_url: str, search: str = "", genre: str = "", compact: bool = False) -> AsyncGenerator[str, None]:
     """
     Async generator that streams both movies and TV shows as JSON.
     Memory efficient - processes documents one at a time using cursor batching.
     Sorted by updated_on descending (newest first) using index.
+    When compact=True, uses projection to skip heavy fields.
     """
     filter_dict = build_filter(search, genre)
+    projection = COMPACT_PROJECTION if compact else None
     
     yield '{"movies":['
     first = True
@@ -181,12 +196,13 @@ async def stream_all_media_json(base_url: str, search: str = "", genre: str = ""
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["movie"]
         
-        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
+        async for doc in collection.find(filter_dict, projection).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
             converted = convert_objectid_to_str(doc)
-            enrich_movie_inplace(converted, base_url)
+            if not compact:
+                enrich_movie_inplace(converted, base_url)
             yield orjson.dumps(converted).decode()
     
     yield '],"tv_shows":['
@@ -197,12 +213,13 @@ async def stream_all_media_json(base_url: str, search: str = "", genre: str = ""
         db_key = f"storage_{i}"
         collection = db.dbs[db_key]["tv"]
         
-        async for doc in collection.find(filter_dict).sort("updated_on", -1).batch_size(100):
+        async for doc in collection.find(filter_dict, projection).sort("updated_on", -1).batch_size(100):
             if not first:
                 yield ','
             first = False
             converted = convert_objectid_to_str(doc)
-            enrich_tv_show_inplace(converted, base_url)
+            if not compact:
+                enrich_tv_show_inplace(converted, base_url)
             yield orjson.dumps(converted).decode()
     
     yield ']}'
@@ -213,15 +230,18 @@ async def paginate_collection_with_search(
     page: int,
     page_size: int,
     search: str = "",
-    genre: str = ""
+    genre: str = "",
+    compact: bool = False
 ) -> dict:
     """
     Paginate a collection with proper server-side search filtering.
     This ensures search is applied BEFORE pagination for correct results.
+    When compact=True, uses projection to skip heavy fields.
     
     Returns dict with: items, total_count, total_pages, current_page, databases_checked
     """
     filter_dict = build_filter(search, genre)
+    projection = COMPACT_PROJECTION if compact else None
     skip = (page - 1) * page_size
     
     results = []
@@ -269,7 +289,7 @@ async def paginate_collection_with_search(
                 break
             
             cursor = (
-                collection.find(filter_dict)
+                collection.find(filter_dict, projection)
                 .sort("updated_on", DESCENDING)
                 .skip(current_skip)
                 .limit(current_limit)
@@ -298,13 +318,15 @@ async def list_all_media(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(24, ge=0, description="Items per page (0 = stream all records)"),
     search: str = Query("", max_length=100, description="Search by title"),
-    genre: str = Query("", max_length=50, description="Filter by genre")
+    genre: str = Query("", max_length=50, description="Filter by genre"),
+    compact: bool = Query(False, description="Return compact list without file/season data")
 ):
     """
     Get combined list of movies and TV shows with enriched telegram metadata.
     
     - page_size=0: Streams ALL records efficiently (memory-safe)
     - page_size>0: Returns paginated results with server-side search
+    - compact=true: Returns only metadata fields (no telegram/seasons/poster/cast data)
     """
     try:
         base_url = get_base_url(request)
@@ -312,23 +334,27 @@ async def list_all_media(
         # Stream all records when page_size=0
         if page_size == 0:
             return StreamingResponse(
-                stream_all_media_json(base_url, search, genre),
+                stream_all_media_json(base_url, search, genre, compact),
                 media_type="application/json"
             )
         
         # Fetch movies and TV shows with proper server-side search
-        movies_data = await paginate_collection_with_search("movie", page, page_size, search, genre)
-        tv_data = await paginate_collection_with_search("tv", page, page_size, search, genre)
+        movies_data = await paginate_collection_with_search("movie", page, page_size, search, genre, compact)
+        tv_data = await paginate_collection_with_search("tv", page, page_size, search, genre, compact)
         
-        # Enrich results in place (no deep copies)
-        enriched_movies = [
-            enrich_movie_inplace(convert_objectid_to_str(m), base_url)
-            for m in movies_data["items"]
-        ]
-        enriched_tv_shows = [
-            enrich_tv_show_inplace(convert_objectid_to_str(t), base_url)
-            for t in tv_data["items"]
-        ]
+        # Convert ObjectId; enrich only when not compact (compact has no telegram data)
+        if compact:
+            processed_movies = [convert_objectid_to_str(m) for m in movies_data["items"]]
+            processed_tv_shows = [convert_objectid_to_str(t) for t in tv_data["items"]]
+        else:
+            processed_movies = [
+                enrich_movie_inplace(convert_objectid_to_str(m), base_url)
+                for m in movies_data["items"]
+            ]
+            processed_tv_shows = [
+                enrich_tv_show_inplace(convert_objectid_to_str(t), base_url)
+                for t in tv_data["items"]
+            ]
         
         # Combine databases checked
         dbs_checked = list(set(
@@ -340,8 +366,8 @@ async def list_all_media(
             "total_pages": max(movies_data["total_pages"], tv_data["total_pages"]),
             "databases_checked": dbs_checked,
             "current_page": page,
-            "movies": enriched_movies,
-            "tv_shows": enriched_tv_shows
+            "movies": processed_movies,
+            "tv_shows": processed_tv_shows
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
@@ -353,13 +379,15 @@ async def list_movies(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(24, ge=0, description="Items per page (0 = stream all records)"),
     search: str = Query("", max_length=100, description="Search by title"),
-    genre: str = Query("", max_length=50, description="Filter by genre")
+    genre: str = Query("", max_length=50, description="Filter by genre"),
+    compact: bool = Query(False, description="Return compact list without file data")
 ):
     """
     Get list of movies with enriched telegram metadata.
     
     - page_size=0: Streams ALL records efficiently (memory-safe)
     - page_size>0: Returns paginated results with server-side search
+    - compact=true: Returns only metadata fields (no telegram/poster/cast data)
     """
     try:
         base_url = get_base_url(request)
@@ -367,25 +395,28 @@ async def list_movies(
         # Stream all records when page_size=0
         if page_size == 0:
             return StreamingResponse(
-                stream_movies_json(base_url, search, genre),
+                stream_movies_json(base_url, search, genre, compact),
                 media_type="application/json"
             )
         
         # Fetch movies with proper server-side search
-        movies_data = await paginate_collection_with_search("movie", page, page_size, search, genre)
+        movies_data = await paginate_collection_with_search("movie", page, page_size, search, genre, compact)
         
-        # Enrich results in place
-        enriched_movies = [
-            enrich_movie_inplace(convert_objectid_to_str(m), base_url)
-            for m in movies_data["items"]
-        ]
+        # Convert ObjectId; enrich only when not compact (compact has no telegram data)
+        if compact:
+            processed_movies = [convert_objectid_to_str(m) for m in movies_data["items"]]
+        else:
+            processed_movies = [
+                enrich_movie_inplace(convert_objectid_to_str(m), base_url)
+                for m in movies_data["items"]
+            ]
         
         return {
             "total_count": movies_data["total_count"],
             "total_pages": movies_data["total_pages"],
             "databases_checked": movies_data["databases_checked"],
             "current_page": movies_data["current_page"],
-            "movies": enriched_movies
+            "movies": processed_movies
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
@@ -397,13 +428,15 @@ async def list_tv_shows(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(24, ge=0, description="Items per page (0 = stream all records)"),
     search: str = Query("", max_length=100, description="Search by title"),
-    genre: str = Query("", max_length=50, description="Filter by genre")
+    genre: str = Query("", max_length=50, description="Filter by genre"),
+    compact: bool = Query(False, description="Return compact list without season/file data")
 ):
     """
     Get list of TV shows with enriched telegram metadata.
     
     - page_size=0: Streams ALL records efficiently (memory-safe)
     - page_size>0: Returns paginated results with server-side search
+    - compact=true: Returns only metadata fields (no seasons/poster/cast data)
     """
     try:
         base_url = get_base_url(request)
@@ -411,25 +444,100 @@ async def list_tv_shows(
         # Stream all records when page_size=0
         if page_size == 0:
             return StreamingResponse(
-                stream_tv_shows_json(base_url, search, genre),
+                stream_tv_shows_json(base_url, search, genre, compact),
                 media_type="application/json"
             )
         
         # Fetch TV shows with proper server-side search
-        tv_data = await paginate_collection_with_search("tv", page, page_size, search, genre)
+        tv_data = await paginate_collection_with_search("tv", page, page_size, search, genre, compact)
         
-        # Enrich results in place
-        enriched_tv_shows = [
-            enrich_tv_show_inplace(convert_objectid_to_str(t), base_url)
-            for t in tv_data["items"]
-        ]
+        # Convert ObjectId; enrich only when not compact (compact has no season data)
+        if compact:
+            processed_tv_shows = [convert_objectid_to_str(t) for t in tv_data["items"]]
+        else:
+            processed_tv_shows = [
+                enrich_tv_show_inplace(convert_objectid_to_str(t), base_url)
+                for t in tv_data["items"]
+            ]
         
         return {
             "total_count": tv_data["total_count"],
             "total_pages": tv_data["total_pages"],
             "databases_checked": tv_data["databases_checked"],
             "current_page": tv_data["current_page"],
-            "tv_shows": enriched_tv_shows
+            "tv_shows": processed_tv_shows
         }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Dedicated file/telegram endpoints - get only file data for a specific title
+# ---------------------------------------------------------------------------
+
+async def find_document_by_tmdb_id(collection_name: str, tmdb_id: int, projection: dict = None) -> Optional[dict]:
+    """
+    Search for a document by tmdb_id across all storage databases.
+    Returns the first match found, or None if not found.
+    """
+    for i in range(1, db.current_db_index + 1):
+        db_key = f"storage_{i}"
+        collection = db.dbs[db_key][collection_name]
+        doc = await collection.find_one({"tmdb_id": tmdb_id}, projection)
+        if doc:
+            return doc
+    return None
+
+
+@router.get("/api/media/movie/{tmdb_id}/files")
+async def get_movie_files(
+    request: Request,
+    tmdb_id: int = Path(..., description="TMDB ID of the movie")
+):
+    """
+    Get only the telegram file data for a specific movie by TMDB ID.
+    Returns the enriched telegram array with streaming URLs, filenames, and sizes.
+    """
+    try:
+        base_url = get_base_url(request)
+        
+        # Fetch only the fields we need
+        projection = {"_id": 0, "tmdb_id": 1, "title": 1, "telegram": 1}
+        doc = await find_document_by_tmdb_id("movie", tmdb_id, projection)
+        
+        if not doc:
+            return JSONResponse(status_code=404, content={"detail": f"Movie with tmdb_id {tmdb_id} not found"})
+        
+        # Enrich telegram objects with streaming URLs
+        enrich_movie_inplace(doc, base_url)
+        
+        return doc
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+@router.get("/api/media/tv/{tmdb_id}/files")
+async def get_tv_show_files(
+    request: Request,
+    tmdb_id: int = Path(..., description="TMDB ID of the TV show")
+):
+    """
+    Get only the season/episode telegram file data for a specific TV show by TMDB ID.
+    Returns the enriched seasons structure with streaming URLs per episode.
+    """
+    try:
+        base_url = get_base_url(request)
+        
+        # Fetch only the fields we need
+        projection = {"_id": 0, "tmdb_id": 1, "title": 1, "seasons": 1}
+        doc = await find_document_by_tmdb_id("tv", tmdb_id, projection)
+        
+        if not doc:
+            return JSONResponse(status_code=404, content={"detail": f"TV show with tmdb_id {tmdb_id} not found"})
+        
+        # Enrich telegram objects with streaming URLs
+        enrich_tv_show_inplace(doc, base_url)
+        
+        return doc
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})

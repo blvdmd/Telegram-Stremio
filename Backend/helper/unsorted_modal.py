@@ -256,3 +256,54 @@ def get_file_extension(filename: str) -> str:
     
     return ""
 
+
+def extract_best_filename(file_name: str, caption: str, file_extension: str) -> str:
+    """
+    Intelligently extract the best filename from caption or fall back to file_name.
+    
+    Logic:
+    1. If caption is empty/None or file_extension is empty -> use file_name
+    2. If caption does NOT contain ".{file_extension}" (case-insensitive) -> use file_name
+    3. If caption DOES contain it -> find the first line with the extension,
+       extract from start of that line up to and including ".{extension}",
+       skipping lines that look like URLs or where the extension is part of a longer word.
+    """
+    if not caption or not caption.strip() or not file_extension:
+        return file_name
+
+    # Normalize: strip leading dot if present (handle both "mkv" and ".mkv")
+    ext_clean = file_extension.lstrip(".")
+    ext_marker = f".{ext_clean}"
+
+    # Caption must contain the extension (case-insensitive check)
+    if ext_marker.lower() not in caption.lower():
+        return file_name
+
+    # Extract filename from the first line that contains .ext
+    for line in caption.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+
+        # Case-insensitive search for the extension marker
+        line_lower = line.lower()
+        idx = line_lower.find(ext_marker.lower())
+        if idx == -1:
+            continue
+
+        candidate_end = idx + len(ext_marker)
+
+        # Ensure the extension is at a word boundary (followed by end-of-string,
+        # whitespace, or common punctuation -- not another alphanumeric char)
+        if candidate_end < len(line) and line[candidate_end].isalnum():
+            continue
+
+        candidate = line[:candidate_end]
+
+        # Skip if it looks like a URL (contains :// before the filename part)
+        if "://" in candidate:
+            continue
+
+        return candidate
+
+    return file_name

@@ -29,10 +29,48 @@ def get_base_url(request: Request) -> str:
     return f"{request.url.scheme}://{request.url.netloc}"
 
 
+def sanitize_filename(filename: str, max_bytes: int = 250) -> str:
+    """
+    Truncate filename to max_bytes while preserving the file extension.
+    Uses byte length (not character count) for SMB/Samba compatibility
+    since Unicode characters can take multiple bytes.
+    """
+    if not filename:
+        return filename
+    
+    encoded = filename.encode('utf-8')
+    if len(encoded) <= max_bytes:
+        return filename
+    
+    # Extract extension (e.g., .mkv)
+    dot_idx = filename.rfind('.')
+    if dot_idx > 0:
+        ext = filename[dot_idx:]
+        base = filename[:dot_idx]
+        ext_bytes = len(ext.encode('utf-8'))
+    else:
+        ext = ""
+        base = filename
+        ext_bytes = 0
+    
+    # Truncate base to fit within limit
+    target_base_bytes = max_bytes - ext_bytes
+    if target_base_bytes <= 0:
+        # Extension alone exceeds limit, just truncate everything
+        return filename.encode('utf-8')[:max_bytes].decode('utf-8', errors='ignore')
+    
+    base_encoded = base.encode('utf-8')[:target_base_bytes]
+    # Decode safely, ignoring partial UTF-8 sequences at the truncation point
+    truncated_base = base_encoded.decode('utf-8', errors='ignore')
+    
+    return truncated_base + ext
+
+
 def enrich_file_with_url(file: dict, base_url: str) -> dict:
-    """Add streaming_url to file document."""
+    """Add streaming_url to file document with sanitized filename."""
     if file and "telegram_id" in file:
-        file_name = file.get("file_name", "file")
+        file_name = sanitize_filename(file.get("file_name", "file"))
+        file["file_name"] = file_name
         file["streaming_url"] = f"{base_url}/dl/{file['telegram_id']}/{file_name}"
     return file
 

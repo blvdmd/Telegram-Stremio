@@ -2,6 +2,7 @@ import math
 import secrets
 import mimetypes
 from typing import Tuple
+from urllib.parse import quote
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -106,10 +107,14 @@ async def media_streamer(
     if not file_id.file_name and "/" in mime_type:
         file_name = f"{secrets.token_hex(2)}.{mime_type.split('/')[1]}"
 
+    # RFC 5987 / RFC 6266: ASCII-safe filename + UTF-8 encoded fallback
+    ascii_name = file_name.encode("ascii", "replace").decode("ascii")
+    utf8_name = quote(file_name, safe="")
+
     headers = {
         "Content-Type": mime_type,
         "Content-Length": str(req_length),
-        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Content-Disposition": f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}",
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=3600, immutable",
         "Access-Control-Allow-Origin": "*",
